@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-label="Tank battle icon">
+  <defs>
+    <linearGradient id="g" x1="18" x2="110" y1="18" y2="110"><stop stop-color="#eab308"/><stop offset="1" stop-color="#53f3ff"/></linearGradient>
+    <filter id="glow" x="-40%" y="-40%" width="180%" height="180%"><feGaussianBlur stdDeviation="3" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+  </defs>
+  <rect x="16" y="16" width="96" height="96" rx="16" fill="#07101f" stroke="url(#g)" stroke-width="4"/>
+  <path d="M35 78h58M39 51h50v31H39z" fill="none" stroke="#eab308" stroke-width="8" stroke-linecap="round" stroke-linejoin="round" filter="url(#glow)"/>
+  <path d="M64 51V28M52 51l-9-14M76 51l9-14" stroke="#53f3ff" stroke-width="7" stroke-linecap="round"/>
+  <circle cx="47" cy="82" r="7" fill="#53f3ff"/><circle cx="81" cy="82" r="7" fill="#53f3ff"/>
+  <path d="M29 98h70" stroke="#ff4fd8" stroke-width="4" stroke-linecap="round"/>
+</svg>

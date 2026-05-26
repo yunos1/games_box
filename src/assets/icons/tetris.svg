@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-label="Tetris icon">
+  <defs>
+    <filter id="glow" x="-40%" y="-40%" width="180%" height="180%">
+      <feGaussianBlur stdDeviation="3" result="blur"/>
+      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+  <rect x="16" y="16" width="96" height="96" rx="16" fill="#07101f" stroke="#38bdf8" stroke-width="4"/>
+  <g filter="url(#glow)" stroke="#07101f" stroke-width="3">
+    <rect x="34" y="34" width="20" height="20" rx="4" fill="#53f3ff"/>
+    <rect x="56" y="34" width="20" height="20" rx="4" fill="#53f3ff"/>
+    <rect x="56" y="56" width="20" height="20" rx="4" fill="#53f3ff"/>
+    <rect x="78" y="56" width="20" height="20" rx="4" fill="#ff4fd8"/>
+    <rect x="34" y="78" width="20" height="20" rx="4" fill="#ffd166"/>
+    <rect x="56" y="78" width="20" height="20" rx="4" fill="#ffd166"/>
+    <rect x="78" y="78" width="20" height="20" rx="4" fill="#7dff6f"/>
+  </g>
+</svg>

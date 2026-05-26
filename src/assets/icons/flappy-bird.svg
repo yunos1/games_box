@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-label="Flappy Bird icon">
+  <defs>
+    <linearGradient id="g" x1="20" x2="108" y1="18" y2="108">
+      <stop stop-color="#67e8f9"/>
+      <stop offset="1" stop-color="#ffd166"/>
+    </linearGradient>
+    <filter id="glow" x="-40%" y="-40%" width="180%" height="180%">
+      <feGaussianBlur stdDeviation="3" result="blur"/>
+      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+  <rect x="16" y="16" width="96" height="96" rx="16" fill="#07101f" stroke="#1d4054" stroke-width="3"/>
+  <path d="M29 29v70M99 29v70" stroke="#53f3ff" stroke-width="8" stroke-linecap="round" filter="url(#glow)"/>
+  <path d="M29 57h20M79 72h20" stroke="#53f3ff" stroke-width="8" stroke-linecap="round"/>
+  <path d="M45 65c10-17 31-17 41 0-10 17-31 17-41 0Z" fill="url(#g)" filter="url(#glow)"/>
+  <path d="M60 66l-17 13 2-18Z" fill="#ff4fd8"/>
+  <circle cx="76" cy="61" r="4" fill="#07101f"/>
+</svg>

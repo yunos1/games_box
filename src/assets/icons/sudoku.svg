@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-label="Sudoku icon">
+  <defs>
+    <linearGradient id="g" x1="18" x2="110" y1="18" y2="110"><stop stop-color="#facc15"/><stop offset="1" stop-color="#a78bfa"/></linearGradient>
+    <filter id="glow" x="-40%" y="-40%" width="180%" height="180%"><feGaussianBlur stdDeviation="2.5" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+  </defs>
+  <rect x="17" y="17" width="94" height="94" rx="14" fill="#07101f" stroke="url(#g)" stroke-width="4"/>
+  <path d="M34 20v88M64 20v88M94 20v88M20 34h88M20 64h88M20 94h88" stroke="#334155" stroke-width="3"/>
+  <path d="M20 49h88M20 79h88M49 20v88M79 20v88" stroke="#53f3ff" stroke-width="2" opacity=".9"/>
+  <text x="42" y="55" text-anchor="middle" font-family="Arial" font-size="24" font-weight="900" fill="#facc15" filter="url(#glow)">7</text>
+  <text x="85" y="90" text-anchor="middle" font-family="Arial" font-size="24" font-weight="900" fill="#ff4fd8" filter="url(#glow)">3</text>
+</svg>

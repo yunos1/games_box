@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-label="Guess number icon">
+  <defs>
+    <linearGradient id="g" x1="18" x2="110" y1="14" y2="116" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#53f3ff"/>
+      <stop offset="1" stop-color="#ff4fd8"/>
+    </linearGradient>
+    <filter id="glow" x="-40%" y="-40%" width="180%" height="180%">
+      <feGaussianBlur stdDeviation="3" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+  <rect x="18" y="18" width="92" height="92" rx="16" fill="#07101f" stroke="url(#g)" stroke-width="4" filter="url(#glow)"/>
+  <path d="M39 44c3-10 12-16 25-16 15 0 25 8 25 20 0 10-5 16-16 22-7 4-9 7-9 14" fill="none" stroke="url(#g)" stroke-width="9" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="64" cy="96" r="5" fill="#53f3ff" filter="url(#glow)"/>
+  <path d="M32 30h10M86 98h10M31 98h10M86 30h10" stroke="#ffd166" stroke-width="3" stroke-linecap="round"/>
+</svg>

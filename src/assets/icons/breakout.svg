@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-label="Breakout icon">
+  <defs>
+    <linearGradient id="g" x1="18" x2="110" y1="18" y2="110">
+      <stop stop-color="#ff6b6b"/>
+      <stop offset="1" stop-color="#53f3ff"/>
+    </linearGradient>
+    <filter id="glow" x="-40%" y="-40%" width="180%" height="180%">
+      <feGaussianBlur stdDeviation="3" result="blur"/>
+      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+  <rect x="16" y="16" width="96" height="96" rx="16" fill="#07101f" stroke="url(#g)" stroke-width="4"/>
+  <path d="M30 35h22M58 35h22M86 35h12M30 51h19M55 51h24M85 51h13M30 67h24M60 67h18M84 67h14" stroke="url(#g)" stroke-width="9" stroke-linecap="round" filter="url(#glow)"/>
+  <circle cx="67" cy="86" r="8" fill="#ffd166" filter="url(#glow)"/>
+  <path d="M40 102h48" stroke="#53f3ff" stroke-width="8" stroke-linecap="round"/>
+</svg>

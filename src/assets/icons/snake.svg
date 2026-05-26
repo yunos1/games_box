@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-label="Snake icon">
+  <defs>
+    <linearGradient id="g" x1="18" x2="110" y1="22" y2="106">
+      <stop stop-color="#7dff6f"/>
+      <stop offset="1" stop-color="#53f3ff"/>
+    </linearGradient>
+    <filter id="glow" x="-40%" y="-40%" width="180%" height="180%">
+      <feGaussianBlur stdDeviation="3" result="blur"/>
+      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+  <rect x="18" y="18" width="92" height="92" rx="16" fill="#07101f" stroke="#1c3b4b" stroke-width="3"/>
+  <path d="M34 38h38c13 0 22 9 22 21s-9 21-22 21H52c-7 0-12 5-12 12s5 12 12 12h31" fill="none" stroke="url(#g)" stroke-width="12" stroke-linecap="round" stroke-linejoin="round" filter="url(#glow)"/>
+  <circle cx="83" cy="104" r="4" fill="#ff4fd8"/>
+  <circle cx="94" cy="104" r="4" fill="#ff4fd8"/>
+  <circle cx="35" cy="38" r="8" fill="#ffd166" filter="url(#glow)"/>
+</svg>

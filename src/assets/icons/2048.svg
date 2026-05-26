@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-label="2048 icon">
+  <defs>
+    <linearGradient id="g" x1="18" x2="110" y1="18" y2="110">
+      <stop stop-color="#ffd166"/>
+      <stop offset="1" stop-color="#ff4fd8"/>
+    </linearGradient>
+    <filter id="glow" x="-40%" y="-40%" width="180%" height="180%">
+      <feGaussianBlur stdDeviation="3" result="blur"/>
+      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+  <rect x="14" y="14" width="100" height="100" rx="16" fill="#07101f" stroke="url(#g)" stroke-width="4" filter="url(#glow)"/>
+  <rect x="27" y="27" width="32" height="32" rx="7" fill="#14213d" stroke="#53f3ff"/>
+  <rect x="69" y="27" width="32" height="32" rx="7" fill="#1f1b3d" stroke="#ff4fd8"/>
+  <rect x="27" y="69" width="32" height="32" rx="7" fill="#251f34" stroke="#ffd166"/>
+  <rect x="69" y="69" width="32" height="32" rx="7" fill="#102d2a" stroke="#7dff6f"/>
+  <text x="43" y="49" text-anchor="middle" font-size="19" font-family="Arial, sans-serif" font-weight="800" fill="#ecfeff">2</text>
+  <text x="85" y="49" text-anchor="middle" font-size="19" font-family="Arial, sans-serif" font-weight="800" fill="#ecfeff">0</text>
+  <text x="43" y="91" text-anchor="middle" font-size="19" font-family="Arial, sans-serif" font-weight="800" fill="#ecfeff">4</text>
+  <text x="85" y="91" text-anchor="middle" font-size="19" font-family="Arial, sans-serif" font-weight="800" fill="#ecfeff">8</text>
+</svg>

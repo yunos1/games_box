@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-label="Maze runner icon">
+  <defs>
+    <linearGradient id="g" x1="18" x2="110" y1="18" y2="110"><stop stop-color="#60a5fa"/><stop offset="1" stop-color="#7dff6f"/></linearGradient>
+    <filter id="glow" x="-40%" y="-40%" width="180%" height="180%"><feGaussianBlur stdDeviation="3" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+  </defs>
+  <rect x="16" y="16" width="96" height="96" rx="16" fill="#07101f" stroke="url(#g)" stroke-width="4"/>
+  <path d="M34 34h60v16H50v14h30v16H50v14h44" fill="none" stroke="#60a5fa" stroke-width="8" stroke-linecap="round" stroke-linejoin="round" filter="url(#glow)"/>
+  <circle cx="34" cy="34" r="7" fill="#ffd166"/>
+  <path d="M95 87l9 7-9 7" fill="none" stroke="#7dff6f" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

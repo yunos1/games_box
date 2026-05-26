@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-label="Tic tac toe icon">
+  <defs>
+    <linearGradient id="g" x1="20" x2="108" y1="20" y2="108">
+      <stop stop-color="#ff4fd8"/>
+      <stop offset="1" stop-color="#53f3ff"/>
+    </linearGradient>
+    <filter id="glow" x="-40%" y="-40%" width="180%" height="180%">
+      <feGaussianBlur stdDeviation="3" result="blur"/>
+      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+  <rect x="18" y="18" width="92" height="92" rx="14" fill="#07101f" stroke="url(#g)" stroke-width="4" filter="url(#glow)"/>
+  <path d="M49 26v76M79 26v76M26 49h76M26 79h76" stroke="#53f3ff" stroke-width="4" stroke-linecap="round"/>
+  <path d="M32 32l12 12M44 32 32 44M84 84l12 12M96 84 84 96" stroke="#ff4fd8" stroke-width="6" stroke-linecap="round"/>
+  <circle cx="91" cy="38" r="9" fill="none" stroke="#ffd166" stroke-width="5"/>
+  <circle cx="38" cy="91" r="9" fill="none" stroke="#7dff6f" stroke-width="5"/>
+</svg>

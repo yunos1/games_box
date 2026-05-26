@@ -1,0 +1,182 @@
+<script setup>
+import { computed } from "vue";
+import { RouterLink } from "vue-router";
+import { ArrowLeft, CheckCircle2, Circle, RotateCcw, Pause, Play, Sparkles, Star, X } from "lucide-vue-next";
+import { getGameById } from "../data/games";
+import { getDailyVariantForGame, getDailyVariantStatus, getGameStarSummary } from "../utils/progress";
+
+const props = defineProps({
+  gameId: {
+    type: String,
+    required: true,
+  },
+  status: {
+    type: String,
+    default: "",
+  },
+  score: {
+    type: [Number, String],
+    default: null,
+  },
+  best: {
+    type: [Number, String],
+    default: null,
+  },
+  moves: {
+    type: [Number, String],
+    default: null,
+  },
+  paused: {
+    type: Boolean,
+    default: false,
+  },
+  showPause: {
+    type: Boolean,
+    default: false,
+  },
+  progressVersion: {
+    type: Number,
+    default: 0,
+  },
+  runResult: {
+    type: Object,
+    default: null,
+  },
+});
+
+const emit = defineEmits(["restart", "toggle-pause", "dismiss-result"]);
+const game = computed(() => getGameById(props.gameId));
+const dailyVariant = computed(() => getDailyVariantForGame(props.gameId));
+const dailyVariantDone = computed(() => {
+  props.progressVersion;
+  return getDailyVariantStatus(props.gameId);
+});
+const starSummary = computed(() => {
+  props.progressVersion;
+  return getGameStarSummary(props.gameId);
+});
+const stats = computed(() =>
+  [
+    props.score !== null ? { label: "分数", value: props.score } : null,
+    props.best !== null ? { label: "最佳", value: props.best } : null,
+    props.moves !== null ? { label: "步数", value: props.moves } : null,
+  ].filter(Boolean),
+);
+</script>
+
+<template>
+  <main class="game-shell">
+    <div class="starfield" aria-hidden="true"></div>
+    <section class="game-frame">
+      <header class="game-topbar">
+        <RouterLink class="icon-button" to="/" aria-label="返回首页">
+          <ArrowLeft :size="20" />
+        </RouterLink>
+        <div class="game-title-wrap">
+          <img v-if="game" class="game-mini-icon" :src="game.icon" alt="" />
+          <div>
+            <p class="game-kicker">{{ game?.subtitle }}</p>
+            <h1>{{ game?.title }}</h1>
+          </div>
+        </div>
+        <div class="game-actions">
+          <button v-if="showPause" class="icon-button" type="button" :aria-label="paused ? '继续' : '暂停'" @click="emit('toggle-pause')">
+            <Play v-if="paused" :size="20" />
+            <Pause v-else :size="20" />
+          </button>
+          <button class="icon-button" type="button" aria-label="重新开始" @click="emit('restart')">
+            <RotateCcw :size="20" />
+          </button>
+        </div>
+      </header>
+
+      <div class="game-info-row">
+        <div v-for="item in stats" :key="item.label" class="stat-chip">
+          <span>{{ item.label }}</span>
+          <strong>{{ item.value }}</strong>
+        </div>
+        <div v-if="status" class="status-chip">{{ status }}</div>
+      </div>
+
+      <div class="game-meta-row">
+        <section v-if="dailyVariant" class="game-rule-card" :class="{ done: dailyVariantDone }">
+          <div class="mini-panel-title">
+            <Sparkles :size="17" />
+            <strong>今日规则</strong>
+            <span>{{ dailyVariantDone ? "已完成" : dailyVariant.title }}</span>
+          </div>
+          <p>{{ dailyVariant.detail }}</p>
+        </section>
+
+        <section class="game-star-card">
+          <div class="mini-panel-title">
+            <Star :size="17" />
+            <strong>星级目标</strong>
+            <span>{{ starSummary.stars }}/{{ starSummary.total }}</span>
+          </div>
+          <div class="star-goal-list">
+            <div
+              v-for="goal in starSummary.goals"
+              :key="goal.id"
+              class="star-goal-item"
+              :class="{ unlocked: goal.unlocked }"
+            >
+              <CheckCircle2 v-if="goal.unlocked" :size="16" />
+              <Circle v-else :size="16" />
+              <div>
+                <strong>{{ goal.title }}</strong>
+                <span>{{ goal.description }}</span>
+              </div>
+            </div>
+          </div>
+        </section>
+      </div>
+
+      <div class="game-content">
+        <slot />
+      </div>
+
+      <div v-if="runResult" class="result-backdrop" role="dialog" aria-modal="true" aria-label="本局结算">
+        <section class="result-modal">
+          <button class="icon-button result-close" type="button" aria-label="关闭结算" @click="emit('dismiss-result')">
+            <X :size="18" />
+          </button>
+          <div class="result-header">
+            <p class="game-kicker">RUN REPORT</p>
+            <h2>{{ runResult.title || "本局结算" }}</h2>
+            <span>{{ runResult.detail || "继续挑战下一颗星。" }}</span>
+          </div>
+
+          <div class="result-stats">
+            <div v-for="item in runResult.stats || []" :key="item.label">
+              <span>{{ item.label }}</span>
+              <strong>{{ item.value }}</strong>
+            </div>
+          </div>
+
+          <div class="result-flags">
+            <span v-if="runResult.variantCompleted" class="result-flag done">今日规则完成</span>
+            <span v-if="runResult.newGoals?.length" class="result-flag">新目标 +{{ runResult.newGoals.length }}</span>
+            <span class="result-flag">{{ runResult.stars || 0 }}/{{ runResult.total || 3 }} 星</span>
+          </div>
+
+          <div v-if="runResult.goals?.length" class="result-goals">
+            <div v-for="goal in runResult.goals" :key="goal.id" :class="{ unlocked: goal.unlocked }">
+              <CheckCircle2 v-if="goal.unlocked" :size="16" />
+              <Circle v-else :size="16" />
+              <div>
+                <strong>{{ goal.title }}</strong>
+                <span>{{ goal.description }}</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="result-actions">
+            <button class="pill-button primary" type="button" @click="emit('restart')">再来一局</button>
+            <button class="pill-button" type="button" @click="emit('dismiss-result')">继续查看</button>
+          </div>
+        </section>
+      </div>
+    </section>
+  </main>
+</template>
