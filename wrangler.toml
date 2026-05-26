@@ -1,5 +1,5 @@
 name = "neon-game-box"
-compatibility_date = "2026-05-26"
+compatibility_date = "2025-01-01"
 
 [assets]
 directory = "./dist"
