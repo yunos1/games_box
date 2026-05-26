@@ -1,5 +1,5 @@
 <script setup>
-import { computed, ref } from "vue";
+import { computed, onUnmounted, ref } from "vue";
 import GameLayout from "../components/GameLayout.vue";
 import { getBestScore, setBestScore } from "../utils/storage";
 
@@ -60,6 +60,7 @@ function buildBoard(safeIndex) {
 }
 
 function restart() {
+  clearPressState();
   const total = config.value.rows * config.value.cols;
   cells.value = Array.from({ length: total }, () => ({
     mine: false,
@@ -99,9 +100,7 @@ function reveal(index) {
 
   const safeCount = config.value.rows * config.value.cols - config.value.mines;
   if (opened.value >= safeCount) {
-    finished.value = true;
-    status.value = "排爆完成";
-    best.value = setBestScore("minesweeper", best.value + 1);
+    completeRun("排爆完成");
   } else {
     status.value = "继续扫描";
   }
@@ -112,21 +111,98 @@ function toggleFlag(index) {
   if (finished.value || !cell || cell.revealed) return;
   cell.flagged = !cell.flagged;
   flags.value += cell.flagged ? 1 : -1;
+  status.value = cell.flagged ? "已标记雷区" : "已取消标记";
+  checkFlagVictory();
 }
 
 function onContext(event, index) {
   event.preventDefault();
+  if (suppressNextClick) {
+    scheduleSuppressClear();
+    return;
+  }
   toggleFlag(index);
 }
 
 let pressTimer = null;
-function onTouchStart(index) {
-  pressTimer = window.setTimeout(() => toggleFlag(index), 420);
+let suppressClearTimer = null;
+let longPressTriggered = false;
+let suppressNextClick = false;
+
+function completeRun(message) {
+  finished.value = true;
+  status.value = message;
+  best.value = setBestScore("minesweeper", best.value + 1);
 }
 
-function onTouchEnd() {
-  window.clearTimeout(pressTimer);
+function checkFlagVictory() {
+  if (!initialized.value || finished.value || flags.value !== config.value.mines) return;
+  const perfectlyFlagged = cells.value.every((cell) => (cell.mine ? cell.flagged : !cell.flagged));
+  if (perfectlyFlagged) completeRun("排爆完成");
 }
+
+function onCellClick(event, index) {
+  if (suppressNextClick) {
+    event.preventDefault();
+    suppressNextClick = false;
+    window.clearTimeout(suppressClearTimer);
+    suppressClearTimer = null;
+    return;
+  }
+  reveal(index);
+}
+
+function onPointerDown(event, index) {
+  if (event.pointerType !== "touch" && event.pointerType !== "pen") return;
+  window.clearTimeout(pressTimer);
+  longPressTriggered = false;
+  pressTimer = window.setTimeout(() => {
+    longPressTriggered = true;
+    suppressNextClick = true;
+    toggleFlag(index);
+  }, 360);
+}
+
+function onPointerUp(event, index) {
+  if (event.pointerType !== "touch" && event.pointerType !== "pen") return;
+  window.clearTimeout(pressTimer);
+  suppressNextClick = true;
+  scheduleSuppressClear();
+  if (longPressTriggered) {
+    longPressTriggered = false;
+    return;
+  }
+  reveal(index);
+}
+
+function onPointerCancel() {
+  window.clearTimeout(pressTimer);
+  if (suppressNextClick) scheduleSuppressClear();
+  longPressTriggered = false;
+}
+
+function scheduleSuppressClear() {
+  window.clearTimeout(suppressClearTimer);
+  suppressClearTimer = window.setTimeout(() => {
+    suppressNextClick = false;
+    suppressClearTimer = null;
+  }, 800);
+}
+
+function clearPressState() {
+  window.clearTimeout(pressTimer);
+  window.clearTimeout(suppressClearTimer);
+  pressTimer = null;
+  suppressClearTimer = null;
+  longPressTriggered = false;
+  suppressNextClick = false;
+}
+
+function clearPressTimer() {
+  clearPressState();
+}
+
+onUnmounted(clearPressTimer);
 
 function switchLevel(key) {
   level.value = key;
@@ -148,7 +224,11 @@ restart();
       <div class="board-shell mines-area">
         <div
           class="mine-board"
-          :style="{ gridTemplateColumns: `repeat(${config.cols}, minmax(0, 1fr))` }"
+          :style="{
+            '--board-ratio': config.cols / config.rows,
+            gridTemplateColumns: `repeat(${config.cols}, minmax(0, 1fr))`,
+            gridTemplateRows: `repeat(${config.rows}, minmax(0, 1fr))`,
+          }"
         >
           <button
             v-for="(cell, index) in cells"
@@ -156,12 +236,14 @@ restart();
             class="mine-cell"
             :class="{ revealed: cell.revealed, flagged: cell.flagged, mine: cell.mine && cell.revealed }"
             type="button"
-            @click="reveal(index)"
+            @click="onCellClick($event, index)"
             @contextmenu="onContext($event, index)"
-            @touchstart.passive="onTouchStart(index)"
-            @touchend.passive="onTouchEnd"
+            @pointerdown="onPointerDown($event, index)"
+            @pointerup="onPointerUp($event, index)"
+            @pointercancel="onPointerCancel"
+            @pointerleave="onPointerCancel"
           >
-            <span v-if="cell.flagged && !cell.revealed">⚑</span>
+            <span v-if="cell.flagged && !cell.revealed" class="flag-icon">🚩</span>
             <span v-else-if="cell.revealed && cell.mine">✹</span>
             <span v-else-if="cell.revealed && cell.count">{{ cell.count }}</span>
           </button>
@@ -189,19 +271,23 @@ restart();
 
 <style scoped>
 .mines-area {
-  overflow: auto;
-  padding: 12px;
+  container-type: size;
+  overflow: hidden;
+  padding: 8px;
 }
 
 .mine-board {
   display: grid;
   gap: 4px;
-  width: min(100%, 620px);
+  width: min(100cqw, calc(100cqh * var(--board-ratio)));
+  height: min(100cqh, calc(100cqw / var(--board-ratio)));
+  min-height: 0;
 }
 
 .mine-cell {
   display: grid;
   min-width: 28px;
+  min-height: 0;
   aspect-ratio: 1;
   place-items: center;
   border: 1px solid rgba(145, 235, 255, 0.16);
@@ -210,6 +296,9 @@ restart();
   color: var(--cyan);
   font-weight: 900;
   cursor: pointer;
+  touch-action: manipulation;
+  user-select: none;
+  -webkit-touch-callout: none;
 }
 
 .mine-cell.revealed {
@@ -218,11 +307,47 @@ restart();
 }
 
 .mine-cell.flagged {
-  color: var(--yellow);
+  border-color: rgba(255, 209, 102, 0.55);
+  background:
+    radial-gradient(circle at 50% 38%, rgba(255, 209, 102, 0.24), transparent 54%),
+    rgba(44, 20, 34, 0.94);
+  box-shadow:
+    inset 0 0 14px rgba(255, 209, 102, 0.18),
+    0 0 12px rgba(255, 79, 216, 0.18);
+  color: #ff4f6d;
+}
+
+.flag-icon {
+  display: grid;
+  width: 100%;
+  height: 100%;
+  place-items: center;
+  font-size: clamp(1.35rem, 4.6vw, 2rem);
+  line-height: 1;
+  filter: drop-shadow(0 0 5px rgba(255, 209, 102, 0.78));
+  transform: translateY(-1px) scale(1.12);
 }
 
 .mine-cell.mine {
   color: var(--danger);
   box-shadow: inset 0 0 18px rgba(255, 92, 124, 0.25);
+}
+
+@media (max-width: 860px) {
+  .mines-area {
+    overflow: hidden;
+    padding: 6px;
+  }
+
+  .mine-board {
+    width: 100%;
+    gap: 3px;
+  }
+
+  .mine-cell {
+    min-width: 0;
+    border-radius: 4px;
+    font-size: 0.82rem;
+  }
 }
 </style>
