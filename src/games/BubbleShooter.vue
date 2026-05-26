@@ -8,6 +8,7 @@ const cols = 10;
 const colors = ["#53f3ff", "#ff4fd8", "#ffd166", "#7dff6f", "#a78bfa"];
 
 const board = ref([]);
+const gridRef = ref(null);
 const current = ref(0);
 const next = ref(1);
 const score = ref(0);
@@ -15,11 +16,33 @@ const best = ref(getBestScore("bubble-shooter"));
 const moves = ref(0);
 const status = ref("点击任意列发射泡泡");
 const finished = ref(false);
+const aimCol = ref(Math.floor(cols / 2));
+const launcherX = ref(50);
 
 const remaining = computed(() => board.value.flat().filter((item) => item !== null).length);
 
 function randomColor() {
   return Math.floor(Math.random() * colors.length);
+}
+
+function clamp(value, min, max) {
+  return Math.min(max, Math.max(min, value));
+}
+
+function activeColorIndexes(source = board.value) {
+  return [...new Set(source.flat().filter((item) => item !== null))];
+}
+
+function randomPlayableColor(activeColors = activeColorIndexes()) {
+  const pool = activeColors.length ? activeColors : colors.map((_, index) => index);
+  return pool[Math.floor(Math.random() * pool.length)];
+}
+
+function advanceQueue(activeColors = activeColorIndexes()) {
+  if (!activeColors.length) return false;
+  current.value = activeColors.includes(next.value) ? next.value : randomPlayableColor(activeColors);
+  next.value = randomPlayableColor(activeColors);
+  return true;
 }
 
 function colorValue(index) {
@@ -30,15 +53,44 @@ function refreshBoard() {
   board.value = board.value.map((row) => [...row]);
 }
 
+function aimAtColumn(col) {
+  aimCol.value = clamp(col, 0, cols - 1);
+  launcherX.value = ((aimCol.value + 0.5) / cols) * 100;
+}
+
+function updateAimFromPointer(event) {
+  const grid = gridRef.value;
+  if (!grid || typeof event.clientX !== "number") return aimCol.value;
+  const rect = grid.getBoundingClientRect();
+  const x = clamp(event.clientX - rect.left, 0, rect.width);
+  const percent = rect.width ? (x / rect.width) * 100 : 50;
+  const col = rect.width ? Math.floor((x / rect.width) * cols) : aimCol.value;
+  aimCol.value = clamp(col, 0, cols - 1);
+  launcherX.value = clamp(percent, 4, 96);
+  return aimCol.value;
+}
+
+function moveLauncher(event) {
+  updateAimFromPointer(event);
+}
+
+function shootFromColumn(col, event) {
+  if (event?.clientX) updateAimFromPointer(event);
+  else aimAtColumn(col);
+  shoot(col);
+}
+
 function restart() {
   board.value = Array.from({ length: rows }, (_, row) =>
     Array.from({ length: cols }, () => (row < 5 ? randomColor() : null)),
   );
-  current.value = randomColor();
-  next.value = randomColor();
+  const activeColors = activeColorIndexes();
+  current.value = randomPlayableColor(activeColors);
+  next.value = randomPlayableColor(activeColors);
   score.value = 0;
   moves.value = 0;
   finished.value = false;
+  aimAtColumn(Math.floor(cols / 2));
   status.value = "点击任意列发射泡泡";
 }
 
@@ -122,31 +174,45 @@ function shoot(col) {
     status.value = "继续寻找三连";
   }
 
-  current.value = next.value;
-  next.value = randomColor();
   refreshBoard();
 
-  if (remaining.value === 0) {
+  const activeColors = activeColorIndexes();
+  if (!activeColors.length) {
     finished.value = true;
     score.value += 500;
     best.value = setBestScore("bubble-shooter", score.value);
     status.value = "全清完成";
-  } else if (board.value[rows - 1].some((value) => value !== null)) {
+    return;
+  }
+
+  if (board.value[rows - 1].some((value) => value !== null)) {
     finished.value = true;
     best.value = setBestScore("bubble-shooter", score.value);
     status.value = "泡泡触底";
+    return;
   }
+
+  advanceQueue(activeColors);
 }
 
 restart();
 </script>
 
 <template>
-  <GameLayout game-id="bubble-shooter" :score="score" :best="best" :moves="moves" :status="status" @restart="restart">
-    <section class="game-panel split-panel">
-      <div class="board-shell">
-        <div class="bubble-stage">
-          <div class="bubble-grid">
+  <GameLayout
+    class="bubble-layout"
+    game-id="bubble-shooter"
+    :score="score"
+    :best="best"
+    :moves="moves"
+    :status="status"
+    @restart="restart"
+  >
+    <section class="game-panel split-panel bubble-panel">
+      <div class="board-shell bubble-board-shell">
+        <div class="bubble-stage" :style="{ '--launcher-x': `${launcherX}%` }" @pointermove="moveLauncher" @pointerdown="moveLauncher">
+          <span class="bubble-aim-line" aria-hidden="true"></span>
+          <div ref="gridRef" class="bubble-grid">
             <div v-for="(row, rowIndex) in board" :key="rowIndex" class="bubble-row" :class="{ odd: rowIndex % 2 }">
               <button
                 v-for="(bubble, colIndex) in row"
@@ -156,45 +222,61 @@ restart();
                 type="button"
                 :style="{ '--bubble-color': colorValue(bubble) }"
                 :aria-label="`发射到第 ${colIndex + 1} 列`"
-                @click="shoot(colIndex)"
+                @click="shootFromColumn(colIndex, $event)"
               >
                 <span v-if="bubble !== null"></span>
               </button>
             </div>
           </div>
           <div class="bubble-launcher">
-            <span class="launcher-line"></span>
-            <span class="bubble-preview" :style="{ '--bubble-color': colorValue(current) }"></span>
+            <div class="bubble-launcher-head">
+              <span class="launcher-line"></span>
+              <span class="bubble-preview" :style="{ '--bubble-color': colorValue(current) }"></span>
+            </div>
           </div>
         </div>
       </div>
-      <aside class="control-panel">
-        <h2>发射器</h2>
-        <p>当前泡泡</p>
-        <div class="bubble-swatches">
+      <aside class="control-panel bubble-control-panel">
+        <div class="bubble-control-title">
+          <h2>发射器</h2>
+          <span>当前 / 下一颗</span>
+        </div>
+        <div class="bubble-swatches" aria-label="当前和下一颗泡泡">
           <span class="bubble-preview large" :style="{ '--bubble-color': colorValue(current) }"></span>
           <span class="bubble-preview" :style="{ '--bubble-color': colorValue(next) }"></span>
         </div>
-        <p>点击目标列发射泡泡，三个及以上相连同色泡泡会被消除，悬空泡泡会一起坠落。</p>
-        <button class="pill-button primary" type="button" @click="restart">重新布阵</button>
+        <button class="pill-button primary bubble-reset-button" type="button" @click="restart">重新布阵</button>
       </aside>
     </section>
   </GameLayout>
 </template>
 
 <style scoped>
+:global(.bubble-layout .game-content) {
+  padding: 10px;
+}
+
 .bubble-stage {
+  --launcher-x: 50%;
+  position: relative;
   display: grid;
-  gap: 14px;
+  grid-template-rows: minmax(0, 1fr) 72px;
+  align-items: stretch;
+  gap: 10px;
   justify-items: center;
-  width: min(92vw, 560px);
-  padding: 14px;
+  width: 100%;
+  height: 100%;
+  padding: 8px;
+  touch-action: none;
 }
 
 .bubble-grid {
   display: grid;
-  gap: 5px;
+  align-content: start;
+  gap: clamp(3px, 1.1vmin, 5px);
   width: 100%;
+  max-width: 620px;
+  margin: 0 auto;
   padding: 12px;
   border: 1px solid rgba(145, 235, 255, 0.22);
   border-radius: var(--radius);
@@ -206,7 +288,7 @@ restart();
 .bubble-row {
   display: grid;
   grid-template-columns: repeat(10, minmax(0, 1fr));
-  gap: 5px;
+  gap: clamp(3px, 1.1vmin, 5px);
 }
 
 .bubble-row.odd {
@@ -223,6 +305,11 @@ restart();
   border-radius: 50%;
   background: rgba(12, 25, 49, 0.56);
   cursor: crosshair;
+  touch-action: manipulation;
+  transition:
+    border-color 0.16s ease,
+    box-shadow 0.16s ease,
+    transform 0.16s ease;
 }
 
 .bubble-cell span,
@@ -248,9 +335,39 @@ restart();
 }
 
 .bubble-launcher {
+  position: relative;
+  width: 100%;
+  max-width: 620px;
+  height: 72px;
+  margin: 0 auto;
+}
+
+.bubble-launcher-head {
+  position: absolute;
+  left: var(--launcher-x);
+  top: 0;
   display: grid;
   place-items: center;
   gap: 7px;
+  transform: translateX(-50%);
+  transition: left 0.08s ease-out;
+}
+
+.bubble-aim-line {
+  position: absolute;
+  left: var(--launcher-x);
+  bottom: 56px;
+  z-index: 2;
+  width: 2px;
+  height: calc(100% - 74px);
+  border-radius: 999px;
+  background: linear-gradient(rgba(83, 243, 255, 0.05), rgba(83, 243, 255, 0.92));
+  box-shadow:
+    0 0 12px rgba(83, 243, 255, 0.72),
+    0 0 28px rgba(83, 243, 255, 0.24);
+  pointer-events: none;
+  transform: translateX(-50%);
+  transition: left 0.08s ease-out;
 }
 
 .launcher-line {
@@ -269,9 +386,143 @@ restart();
   width: 52px;
 }
 
+.control-panel.bubble-control-panel {
+  grid-template-columns: minmax(72px, 0.8fr) auto minmax(92px, 120px);
+  align-items: center;
+  align-content: center;
+  gap: 10px;
+  overflow: visible;
+  padding: 10px;
+}
+
+.bubble-control-title {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.bubble-control-title h2 {
+  margin: 0;
+  overflow: hidden;
+  font-size: 0.98rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bubble-control-title span {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 0.72rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .bubble-swatches {
   display: flex;
   align-items: center;
-  gap: 14px;
+  justify-content: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.bubble-control-panel .bubble-preview {
+  width: 30px;
+}
+
+.bubble-control-panel .bubble-preview.large {
+  width: 44px;
+}
+
+.bubble-reset-button {
+  min-height: 38px;
+  min-width: 0;
+  padding: 7px 10px;
+  white-space: nowrap;
+}
+
+@media (max-width: 860px) {
+  :global(.bubble-layout.game-shell) {
+    padding: 0;
+  }
+
+  :global(.bubble-layout .game-frame) {
+    border-radius: 0;
+  }
+
+  :global(.bubble-layout .game-content) {
+    padding: 4px;
+  }
+
+  .bubble-panel.split-panel {
+    grid-template-rows: minmax(0, 1fr) auto;
+    gap: 4px;
+  }
+
+  .bubble-board-shell {
+    height: 100%;
+    padding: 2px;
+  }
+
+  .bubble-stage {
+    grid-template-rows: minmax(0, 1fr) 58px;
+    gap: 4px;
+    padding: 2px;
+  }
+
+  .bubble-grid {
+    padding: 6px;
+  }
+
+  .bubble-launcher {
+    height: 58px;
+  }
+
+  .bubble-aim-line {
+    bottom: 44px;
+    height: calc(100% - 56px);
+  }
+
+  .launcher-line {
+    height: 32px;
+  }
+
+  .bubble-launcher-head {
+    gap: 4px;
+  }
+
+  .control-panel.bubble-control-panel {
+    grid-template-columns: minmax(66px, 0.85fr) auto minmax(84px, 104px);
+    max-height: none;
+    padding: 8px;
+    border-radius: 10px;
+  }
+
+  .bubble-control-title h2 {
+    font-size: 0.92rem;
+  }
+
+  .bubble-control-title span {
+    font-size: 0.66rem;
+  }
+
+  .bubble-control-panel .bubble-preview {
+    width: 26px;
+  }
+
+  .bubble-control-panel .bubble-preview.large {
+    width: 38px;
+  }
+
+  .bubble-reset-button {
+    min-height: 34px;
+    padding: 6px 8px;
+    font-size: 0.82rem;
+  }
+}
+
+@media (max-width: 430px), (max-height: 720px) {
+  .bubble-panel.split-panel {
+    grid-template-rows: minmax(0, 1fr) auto;
+  }
 }
 </style>
