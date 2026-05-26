@@ -24,6 +24,7 @@ import {
 } from "lucide-vue-next";
 import GameCard from "../components/GameCard.vue";
 import { games } from "../data/games";
+import { getCampaignSummary, getQuestChain } from "../utils/campaign";
 import { getProgress } from "../utils/storage";
 import {
   getDailyChallenge,
@@ -45,6 +46,8 @@ const achievements = getUnlockedAchievements();
 const starTotal = getTotalStarCount();
 const starMax = games.length * 3;
 const rewards = getUnlockedRewards(starTotal);
+const campaignSummary = getCampaignSummary();
+const questChain = getQuestChain();
 const unlockedCount = computed(() => achievements.filter((item) => item.unlocked).length);
 const rewardCount = computed(() => rewards.filter((item) => item.unlocked).length);
 const activeTab = ref("featured");
@@ -205,7 +208,7 @@ const tabs = computed(() => [
     </nav>
 
     <section v-if="activeTab === 'featured'" class="tab-panel" aria-label="推荐">
-      <section class="home-dashboard compact-dashboard" aria-label="玩家控制台">
+      <section class="home-dashboard platform-dashboard" aria-label="玩家控制台">
         <article class="dashboard-panel daily-panel" :style="{ '--accent': challenge.accent }">
           <div class="panel-title">
             <Target :size="19" />
@@ -235,6 +238,30 @@ const tabs = computed(() => [
             <span>每日路线</span>
             <span>本地存档</span>
             <span>手动结算</span>
+          </div>
+        </RouterLink>
+
+        <RouterLink
+          class="dashboard-panel campaign-panel"
+          to="/campaign"
+          :style="{ '--accent': campaignSummary.nextNode?.game.accent || '#53f3ff' }"
+        >
+          <div class="panel-title">
+            <Flag :size="19" />
+            <span>关卡地图</span>
+          </div>
+          <div class="campaign-panel-core">
+            <h2>{{ campaignSummary.nextNode?.game.title || "路线已点亮" }}</h2>
+            <p>
+              {{ campaignSummary.nextNode ? `下一关：${campaignSummary.nextNode.game.description}` : "所有路线都已打卡，可以回去补满星。" }}
+            </p>
+          </div>
+          <div class="campaign-panel-meter" aria-hidden="true">
+            <span :style="{ width: `${campaignSummary.percent}%` }"></span>
+          </div>
+          <div class="marathon-tags">
+            <span>{{ campaignSummary.completed }}/{{ campaignSummary.total }}</span>
+            <span>{{ campaignSummary.stars }}/{{ campaignSummary.totalStars }} 星</span>
           </div>
         </RouterLink>
       </section>
@@ -296,6 +323,25 @@ const tabs = computed(() => [
         <span><Clock3 :size="16" />最近玩过</span>
         <RouterLink v-for="game in recentlyPlayedGames" :key="game.id" :to="game.route" :style="{ '--accent': game.accent }">
           {{ game.title }}
+        </RouterLink>
+      </section>
+
+      <section class="quest-strip" aria-label="任务链">
+        <RouterLink
+          v-for="quest in questChain"
+          :key="quest.id"
+          class="dashboard-panel quest-mini-card"
+          :class="{ done: quest.done }"
+          :to="quest.route"
+          :style="{ '--accent': quest.accent }"
+        >
+          <div class="panel-title">
+            <CheckCircle2 v-if="quest.done" :size="18" />
+            <Circle v-else :size="18" />
+            <span>{{ quest.title }}</span>
+          </div>
+          <p>{{ quest.detail }}</p>
+          <strong>{{ quest.progress }}</strong>
         </RouterLink>
       </section>
 

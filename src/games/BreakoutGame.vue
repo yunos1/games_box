@@ -18,8 +18,10 @@ const dailyVariant = getDailyVariantForGame("breakout");
 const variantEffect = dailyVariant?.effect || "";
 
 let ctx;
-let width = 720;
-let height = 480;
+const desktopBoard = { width: 720, height: 480 };
+const mobileBoard = { width: 480, height: 720 };
+let width = desktopBoard.width;
+let height = desktopBoard.height;
 let paddle;
 let ball;
 let bricks;
@@ -264,9 +266,23 @@ function loop() {
   loopId = requestAnimationFrame(loop);
 }
 
+function updateBoardSize() {
+  const parentWidth = canvas.value?.parentElement?.clientWidth || window.innerWidth;
+  const nextBoard = parentWidth <= 520 ? mobileBoard : desktopBoard;
+  if (width === nextBoard.width && height === nextBoard.height) return false;
+  width = nextBoard.width;
+  height = nextBoard.height;
+  canvas.value.width = width;
+  canvas.value.height = height;
+  return true;
+}
+
 function resize() {
-  const max = canvas.value.parentElement.clientWidth - 24;
-  const displayWidth = Math.min(max, 720);
+  const modeChanged = updateBoardSize();
+  if (modeChanged && paddle) restart();
+  const canvasInset = width === mobileBoard.width ? 8 : 24;
+  const max = Math.max(220, canvas.value.parentElement.clientWidth - canvasInset);
+  const displayWidth = Math.min(max, width);
   canvas.value.style.width = `${displayWidth}px`;
   canvas.value.style.height = `${displayWidth * (height / width)}px`;
 }
@@ -291,6 +307,7 @@ function onKeyUp(event) {
 
 onMounted(() => {
   ctx = canvas.value.getContext("2d");
+  updateBoardSize();
   canvas.value.width = width;
   canvas.value.height = height;
   restart();

@@ -13,6 +13,11 @@ export const routes = [
     component: () => import("../views/MarathonView.vue"),
   },
   {
+    path: "/campaign",
+    name: "campaign",
+    component: () => import("../views/CampaignView.vue"),
+  },
+  {
     path: "/game/guess-number",
     name: "guess-number",
     component: () => import("../games/GuessNumber.vue"),

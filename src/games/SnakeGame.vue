@@ -1,8 +1,9 @@
 <script setup>
-import { onMounted, onUnmounted, ref } from "vue";
+import { computed, onMounted, onUnmounted, ref } from "vue";
 import GameLayout from "../components/GameLayout.vue";
 import { createSwipeHandlers } from "../utils/touch";
-import { getBestScore, setBestScore } from "../utils/storage";
+import { SNAKE_SKINS, getSnakeSkinById } from "../data/snakeSkins";
+import { getBestScore, getSavedValue, setBestScore, setSavedValue } from "../utils/storage";
 import { getDailyVariantForGame, recordGameResult } from "../utils/progress";
 
 const canvas = ref(null);
@@ -12,6 +13,8 @@ const status = ref("收集能量核心");
 const paused = ref(false);
 const progressVersion = ref(0);
 const runResult = ref(null);
+const selectedSkinId = ref(getSavedValue("snake:skin", "cyber"));
+const selectedSkin = computed(() => getSnakeSkinById(selectedSkinId.value));
 const dailyVariant = getDailyVariantForGame("snake");
 const variantEffect = dailyVariant?.effect || "";
 
@@ -27,6 +30,12 @@ let gameOver = false;
 let foodsEaten = 0;
 let maxLength = 3;
 let runNewGoalIds = new Set();
+
+function selectSkin(id) {
+  selectedSkinId.value = id;
+  setSavedValue("snake:skin", id);
+  draw();
+}
 
 function placeFood() {
   do {
@@ -158,10 +167,189 @@ function drawGrid(width, cell) {
   }
 }
 
+function roundedRect(x, y, width, height, radius) {
+  ctx.beginPath();
+  ctx.moveTo(x + radius, y);
+  ctx.arcTo(x + width, y, x + width, y + height, radius);
+  ctx.arcTo(x + width, y + height, x, y + height, radius);
+  ctx.arcTo(x, y + height, x, y, radius);
+  ctx.arcTo(x, y, x + width, y, radius);
+  ctx.closePath();
+}
+
+function drawSkinPattern(skin, x, y, size, index) {
+  const cx = x + size / 2;
+  const cy = y + size / 2;
+  ctx.save();
+  ctx.globalAlpha = 0.9;
+  ctx.strokeStyle = skin.bodyAlt;
+  ctx.fillStyle = skin.bodyAlt;
+  ctx.lineWidth = Math.max(1.2, size * 0.08);
+
+  if (skin.pattern === "circuits") {
+    ctx.beginPath();
+    ctx.moveTo(x + size * 0.22, cy);
+    ctx.lineTo(x + size * 0.78, cy);
+    ctx.moveTo(cx, y + size * 0.26);
+    ctx.lineTo(cx, y + size * 0.46);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.arc(x + size * 0.78, cy, size * 0.08, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  if (skin.pattern === "cracks") {
+    ctx.beginPath();
+    ctx.moveTo(x + size * 0.24, y + size * 0.24);
+    ctx.lineTo(cx, cy);
+    ctx.lineTo(x + size * 0.7, y + size * 0.76);
+    ctx.stroke();
+  }
+
+  if (skin.pattern === "snow") {
+    ctx.lineWidth = Math.max(1, size * 0.06);
+    ctx.beginPath();
+    ctx.moveTo(cx - size * 0.18, cy);
+    ctx.lineTo(cx + size * 0.18, cy);
+    ctx.moveTo(cx, cy - size * 0.18);
+    ctx.lineTo(cx, cy + size * 0.18);
+    ctx.stroke();
+  }
+
+  if (skin.pattern === "leaves") {
+    ctx.save();
+    ctx.translate(cx, cy);
+    ctx.rotate(index % 2 ? -0.65 : 0.65);
+    ctx.beginPath();
+    ctx.ellipse(0, 0, size * 0.2, size * 0.09, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
+
+  if (skin.pattern === "gems") {
+    ctx.beginPath();
+    ctx.moveTo(cx, y + size * 0.18);
+    ctx.lineTo(x + size * 0.72, cy);
+    ctx.lineTo(cx, y + size * 0.82);
+    ctx.lineTo(x + size * 0.28, cy);
+    ctx.closePath();
+    ctx.fill();
+  }
+
+  if (skin.pattern === "stripes") {
+    ctx.beginPath();
+    ctx.moveTo(x + size * 0.24, y + size * 0.82);
+    ctx.lineTo(x + size * 0.82, y + size * 0.24);
+    ctx.stroke();
+  }
+
+  if (skin.pattern === "stars") {
+    ctx.lineWidth = Math.max(1, size * 0.05);
+    ctx.beginPath();
+    ctx.moveTo(cx - size * 0.2, cy);
+    ctx.lineTo(cx + size * 0.2, cy);
+    ctx.moveTo(cx, cy - size * 0.2);
+    ctx.lineTo(cx, cy + size * 0.2);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.arc(cx, cy, size * 0.05, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  if (skin.pattern === "scales") {
+    ctx.globalAlpha = 0.55;
+    for (let i = 0; i < 3; i += 1) {
+      ctx.beginPath();
+      ctx.arc(x + size * (0.28 + i * 0.22), cy, size * 0.12, Math.PI, Math.PI * 2);
+      ctx.stroke();
+    }
+  }
+
+  if (skin.pattern === "tiger") {
+    ctx.lineWidth = Math.max(1.4, size * 0.12);
+    ctx.beginPath();
+    ctx.moveTo(x + size * 0.2, y + size * 0.22);
+    ctx.lineTo(x + size * 0.72, y + size * 0.76);
+    ctx.stroke();
+  }
+
+  if (skin.pattern === "mist") {
+    ctx.globalAlpha = 0.26;
+    ctx.beginPath();
+    ctx.arc(x + size * 0.36, y + size * 0.36, size * 0.2, 0, Math.PI * 2);
+    ctx.arc(x + size * 0.68, y + size * 0.66, size * 0.16, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  ctx.restore();
+}
+
+function drawSnakePart(part, index, cell, skin) {
+  const gap = Math.max(2, cell * 0.08);
+  const x = part.x * cell + gap;
+  const y = part.y * cell + gap;
+  const size = cell - gap * 2;
+  const center = { x: x + size / 2, y: y + size / 2 };
+  const isHead = index === 0;
+
+  ctx.save();
+  ctx.shadowBlur = isHead ? 22 : 15;
+  ctx.shadowColor = isHead ? skin.head : skin.glow;
+  const fill = ctx.createLinearGradient(x, y, x + size, y + size);
+  fill.addColorStop(0, isHead ? skin.head : skin.body);
+  fill.addColorStop(1, skin.bodyAlt);
+  ctx.fillStyle = fill;
+  roundedRect(x, y, size, size, isHead ? size * 0.42 : size * 0.34);
+  ctx.fill();
+
+  ctx.shadowBlur = 0;
+  ctx.fillStyle = "rgba(255,255,255,0.24)";
+  roundedRect(x + size * 0.18, y + size * 0.14, size * 0.32, size * 0.14, size * 0.07);
+  ctx.fill();
+  if (!isHead) drawSkinPattern(skin, x, y, size, index);
+
+  if (isHead) {
+    const dir = direction || { x: 1, y: 0 };
+    const side = { x: -dir.y, y: dir.x };
+    const forward = { x: dir.x, y: dir.y };
+    const eyeForward = size * 0.2;
+    const eyeSide = size * 0.18;
+    const eyeRadius = Math.max(2.2, size * 0.09);
+    const eyes = [-1, 1].map((sign) => ({
+      x: center.x + forward.x * eyeForward + side.x * eyeSide * sign,
+      y: center.y + forward.y * eyeForward + side.y * eyeSide * sign,
+    }));
+    ctx.fillStyle = skin.eye;
+    eyes.forEach((eye) => {
+      ctx.beginPath();
+      ctx.arc(eye.x, eye.y, eyeRadius, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = "rgba(255,255,255,0.78)";
+      ctx.beginPath();
+      ctx.arc(eye.x + eyeRadius * 0.25, eye.y - eyeRadius * 0.25, eyeRadius * 0.32, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = skin.eye;
+    });
+
+    ctx.strokeStyle = skin.bodyAlt;
+    ctx.lineWidth = Math.max(1.2, size * 0.08);
+    ctx.lineCap = "round";
+    ctx.beginPath();
+    ctx.moveTo(center.x + forward.x * size * 0.42, center.y + forward.y * size * 0.42);
+    ctx.lineTo(center.x + forward.x * size * 0.62 + side.x * size * 0.15, center.y + forward.y * size * 0.62 + side.y * size * 0.15);
+    ctx.moveTo(center.x + forward.x * size * 0.42, center.y + forward.y * size * 0.42);
+    ctx.lineTo(center.x + forward.x * size * 0.62 - side.x * size * 0.15, center.y + forward.y * size * 0.62 - side.y * size * 0.15);
+    ctx.stroke();
+  }
+
+  ctx.restore();
+}
+
 function draw() {
   if (!canvas.value) return;
   const width = canvas.value.width;
   const cell = width / grid;
+  const skin = selectedSkin.value;
   ctx.clearRect(0, 0, width, width);
   ctx.fillStyle = "#020611";
   ctx.fillRect(0, 0, width, width);
@@ -174,10 +362,8 @@ function draw() {
   ctx.arc(food.x * cell + cell / 2, food.y * cell + cell / 2, cell * (food.kind === "gold" ? 0.42 : 0.32), 0, Math.PI * 2);
   ctx.fill();
 
-  snake.forEach((part, index) => {
-    ctx.shadowColor = index === 0 ? "#53f3ff" : "#7dff6f";
-    ctx.fillStyle = index === 0 ? "#53f3ff" : "#7dff6f";
-    ctx.fillRect(part.x * cell + 2, part.y * cell + 2, cell - 4, cell - 4);
+  [...snake].reverse().forEach((part, reversedIndex) => {
+    drawSnakePart(part, snake.length - 1 - reversedIndex, cell, skin);
   });
   ctx.shadowBlur = 0;
 }
@@ -279,7 +465,104 @@ onUnmounted(() => {
           <button class="right" type="button" @click="setDirection('right')">→</button>
           <button class="down" type="button" @click="setDirection('down')">↓</button>
         </div>
+        <h3>皮肤</h3>
+        <div class="snake-skin-grid" role="list" aria-label="贪吃蛇皮肤">
+          <button
+            v-for="skin in SNAKE_SKINS"
+            :key="skin.id"
+            class="snake-skin-option"
+            :class="{ active: selectedSkinId === skin.id }"
+            :style="{ '--skin': skin.body, '--skin-alt': skin.bodyAlt, '--skin-glow': skin.glow }"
+            type="button"
+            role="listitem"
+            :aria-pressed="selectedSkinId === skin.id"
+            @click="selectSkin(skin.id)"
+          >
+            <img :src="skin.preview" alt="" />
+            <span>
+              <strong>{{ skin.name }}</strong>
+              <small>{{ skin.subtitle }}</small>
+            </span>
+          </button>
+        </div>
       </aside>
     </section>
   </GameLayout>
 </template>
+
+<style scoped>
+.snake-skin-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.snake-skin-option {
+  display: grid;
+  grid-template-columns: 42px minmax(0, 1fr);
+  gap: 8px;
+  align-items: center;
+  min-height: 58px;
+  padding: 7px;
+  border: 1px solid rgba(145, 235, 255, 0.18);
+  border-radius: 10px;
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--skin), transparent 84%), rgba(5, 10, 22, 0.62)),
+    rgba(6, 13, 28, 0.74);
+  color: var(--text);
+  cursor: pointer;
+  text-align: left;
+  transition:
+    border-color 0.18s ease,
+    box-shadow 0.18s ease,
+    transform 0.18s ease;
+}
+
+.snake-skin-option:hover,
+.snake-skin-option.active {
+  border-color: color-mix(in srgb, var(--skin), white 18%);
+  box-shadow: 0 0 18px color-mix(in srgb, var(--skin-glow), transparent 72%);
+}
+
+.snake-skin-option:hover {
+  transform: translateY(-1px);
+}
+
+.snake-skin-option img {
+  width: 42px;
+  height: 42px;
+  border-radius: 8px;
+  object-fit: cover;
+  box-shadow: 0 0 14px color-mix(in srgb, var(--skin-glow), transparent 58%);
+}
+
+.snake-skin-option span,
+.snake-skin-option strong,
+.snake-skin-option small {
+  display: block;
+  min-width: 0;
+}
+
+.snake-skin-option strong,
+.snake-skin-option small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.snake-skin-option strong {
+  font-size: 0.78rem;
+}
+
+.snake-skin-option small {
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 0.68rem;
+}
+
+@media (max-width: 860px) {
+  .snake-skin-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+</style>

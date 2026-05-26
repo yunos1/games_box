@@ -142,6 +142,15 @@
     rgba(6, 13, 28, 0.62);
 }
 
+.game-meta-card > summary {
+  cursor: pointer;
+  list-style: none;
+}
+
+.game-meta-card > summary::-webkit-details-marker {
+  display: none;
+}
+
 .mini-panel-title {
   display: flex;
   align-items: center;
@@ -669,6 +678,69 @@
   line-height: 1.4;
 }
 
+.result-next-card {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  min-height: 76px;
+  padding: 10px;
+  border: 1px solid color-mix(in srgb, var(--accent), transparent 58%);
+  border-radius: var(--radius);
+  background:
+    linear-gradient(145deg, rgba(5, 10, 22, 0.68), rgba(5, 10, 22, 0.46)),
+    linear-gradient(90deg, color-mix(in srgb, var(--accent), transparent 90%), transparent 48%);
+  transition:
+    border-color 0.18s ease,
+    transform 0.18s ease;
+}
+
+.result-next-card:hover {
+  transform: translateY(-2px);
+  border-color: color-mix(in srgb, var(--accent), white 8%);
+}
+
+.result-next-card img {
+  width: 46px;
+  height: 46px;
+  filter: drop-shadow(0 0 10px color-mix(in srgb, var(--accent), transparent 26%));
+}
+
+.result-next-card div {
+  min-width: 0;
+}
+
+.result-next-card span,
+.result-next-card strong,
+.result-next-card p {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.result-next-card span {
+  color: color-mix(in srgb, var(--accent), white 18%);
+  font-size: 0.75rem;
+  font-weight: 900;
+}
+
+.result-next-card strong {
+  margin-top: 2px;
+  color: #ecfeff;
+  font-size: 1rem;
+}
+
+.result-next-card p {
+  margin: 3px 0 0;
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
+.result-next-card svg {
+  color: color-mix(in srgb, var(--accent), white 14%);
+}
+
 .result-actions {
   display: flex;
   flex-wrap: wrap;
@@ -678,52 +750,134 @@
 
 @media (max-width: 860px) {
   .game-shell {
-    padding: 10px;
+    padding: 6px;
   }
 
   .game-frame {
-    min-height: calc(100vh - 20px);
+    min-height: calc(100vh - 12px);
+    min-height: calc(100svh - 12px);
+    border-radius: 10px;
   }
 
   .split-panel {
     grid-template-columns: 1fr;
+    gap: 8px;
   }
 
   .game-topbar {
     grid-template-columns: auto minmax(0, 1fr) auto;
-    gap: 10px;
-    padding: 12px;
+    gap: 8px;
+    padding: 8px;
   }
 
   .game-mini-icon {
-    width: 38px;
-    height: 38px;
+    width: 34px;
+    height: 34px;
   }
 
   .icon-button {
-    width: 38px;
-    height: 38px;
+    width: 36px;
+    height: 36px;
+  }
+
+  .game-info-row {
+    gap: 6px;
+    padding: 8px 8px 0;
+  }
+
+  .stat-chip,
+  .status-chip {
+    min-height: 30px;
+    padding: 5px 8px;
+    gap: 5px;
+    font-size: 0.8rem;
   }
 
   .game-content {
-    padding: 12px;
+    padding: 8px;
   }
 
   .game-meta-row {
-    grid-template-columns: 1fr;
-    padding: 10px 12px 0;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 6px;
+    padding: 8px 8px 0;
+  }
+
+  .game-rule-card,
+  .game-star-card {
+    padding: 8px;
+    border-radius: 10px;
+  }
+
+  .mini-panel-title {
+    gap: 5px;
+    font-size: 0.74rem;
+  }
+
+  .mini-panel-title svg {
+    width: 14px;
+    height: 14px;
+  }
+
+  .mini-panel-title span {
+    max-width: 48%;
+  }
+
+  .game-meta-card:not([open]) {
+    min-height: 38px;
+  }
+
+  .game-meta-card:not([open]) .mini-panel-title {
+    min-height: 20px;
+  }
+
+  .game-rule-card p {
+    margin-top: 7px;
+    font-size: 0.78rem;
+    line-height: 1.45;
   }
 
   .star-goal-list {
     grid-template-columns: 1fr;
+    margin-top: 7px;
+  }
+
+  .star-goal-item {
+    min-height: 0;
+    padding: 7px;
   }
 
   .result-stats {
     grid-template-columns: 1fr;
   }
 
+  .game-panel {
+    gap: 8px;
+  }
+
+  .control-panel {
+    gap: 8px;
+    padding: 10px;
+  }
+
+  .control-panel p {
+    font-size: 0.82rem;
+    line-height: 1.45;
+  }
+
+  .segmented {
+    gap: 6px;
+  }
+
+  .segmented button {
+    min-height: 34px;
+    padding: 6px 9px;
+  }
+
   .board-shell {
-    min-height: 320px;
+    min-height: 360px;
+    min-height: clamp(360px, 60svh, 620px);
+    border-radius: 10px;
   }
 }
 
@@ -736,11 +890,24 @@
     font-size: 1.24rem;
   }
 
+  .game-title-wrap {
+    gap: 8px;
+  }
+
   .game-actions {
     gap: 6px;
   }
 
+  .game-meta-row {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .mini-panel-title strong {
+    max-width: 56px;
+  }
+
   .canvas-board {
-    max-height: 58vh;
+    max-height: 70vh;
+    max-height: min(70svh, 620px);
   }
 }

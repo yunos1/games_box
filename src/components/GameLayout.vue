@@ -1,8 +1,9 @@
 <script setup>
-import { computed } from "vue";
+import { computed, onMounted, onUnmounted, ref } from "vue";
 import { RouterLink } from "vue-router";
 import { ArrowLeft, CheckCircle2, Circle, RotateCcw, Pause, Play, Sparkles, Star, X } from "lucide-vue-next";
 import { getGameById } from "../data/games";
+import { getNextCampaignNode } from "../utils/campaign";
 import { getDailyVariantForGame, getDailyVariantStatus, getGameStarSummary } from "../utils/progress";
 
 const props = defineProps({
@@ -55,6 +56,22 @@ const starSummary = computed(() => {
   props.progressVersion;
   return getGameStarSummary(props.gameId);
 });
+const compactMeta = ref(null);
+const ruleMetaOpen = ref(false);
+const starMetaOpen = ref(false);
+let metaQuery;
+const updateCompactMeta = () => {
+  const nextCompact = Boolean(metaQuery?.matches);
+  if (compactMeta.value === nextCompact) return;
+  compactMeta.value = nextCompact;
+  ruleMetaOpen.value = !nextCompact;
+  starMetaOpen.value = !nextCompact;
+};
+const syncMetaOpen = (target, event) => {
+  const isOpen = event.target.open;
+  if (target === "rule") ruleMetaOpen.value = isOpen;
+  if (target === "star") starMetaOpen.value = isOpen;
+};
 const stats = computed(() =>
   [
     props.score !== null ? { label: "分数", value: props.score } : null,
@@ -62,6 +79,21 @@ const stats = computed(() =>
     props.moves !== null ? { label: "步数", value: props.moves } : null,
   ].filter(Boolean),
 );
+const nextCampaignNode = computed(() => {
+  props.progressVersion;
+  return getNextCampaignNode(props.gameId);
+});
+const nextActionLabel = computed(() => (nextCampaignNode.value?.game.id === props.gameId ? "继续补星" : "下一关"));
+
+onMounted(() => {
+  metaQuery = window.matchMedia("(max-width: 860px)");
+  updateCompactMeta();
+  metaQuery.addEventListener("change", updateCompactMeta);
+});
+
+onUnmounted(() => {
+  metaQuery?.removeEventListener("change", updateCompactMeta);
+});
 </script>
 
 <template>
@@ -99,21 +131,27 @@ const stats = computed(() =>
       </div>
 
       <div class="game-meta-row">
-        <section v-if="dailyVariant" class="game-rule-card" :class="{ done: dailyVariantDone }">
-          <div class="mini-panel-title">
+        <details
+          v-if="dailyVariant"
+          class="game-rule-card game-meta-card"
+          :class="{ done: dailyVariantDone }"
+          :open="ruleMetaOpen"
+          @toggle="syncMetaOpen('rule', $event)"
+        >
+          <summary class="mini-panel-title">
             <Sparkles :size="17" />
             <strong>今日规则</strong>
             <span>{{ dailyVariantDone ? "已完成" : dailyVariant.title }}</span>
-          </div>
+          </summary>
           <p>{{ dailyVariant.detail }}</p>
-        </section>
+        </details>
 
-        <section class="game-star-card">
-          <div class="mini-panel-title">
+        <details class="game-star-card game-meta-card" :open="starMetaOpen" @toggle="syncMetaOpen('star', $event)">
+          <summary class="mini-panel-title">
             <Star :size="17" />
             <strong>星级目标</strong>
             <span>{{ starSummary.stars }}/{{ starSummary.total }}</span>
-          </div>
+          </summary>
           <div class="star-goal-list">
             <div
               v-for="goal in starSummary.goals"
@@ -129,7 +167,7 @@ const stats = computed(() =>
               </div>
             </div>
           </div>
-        </section>
+        </details>
       </div>
 
       <div class="game-content">
@@ -170,6 +208,21 @@ const stats = computed(() =>
               </div>
             </div>
           </div>
+
+          <RouterLink
+            v-if="nextCampaignNode"
+            class="result-next-card"
+            :to="nextCampaignNode.game.route"
+            :style="{ '--accent': nextCampaignNode.game.accent }"
+          >
+            <img :src="nextCampaignNode.game.icon" alt="" />
+            <div>
+              <span>{{ nextActionLabel }}</span>
+              <strong>{{ nextCampaignNode.game.title }}</strong>
+              <p>{{ nextCampaignNode.game.description }}</p>
+            </div>
+            <Play :size="18" />
+          </RouterLink>
 
           <div class="result-actions">
             <button class="pill-button primary" type="button" @click="emit('restart')">再来一局</button>
