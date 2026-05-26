@@ -100,4 +100,11 @@ onUnmounted(() => window.clearInterval(timer));
   background: #f97316;
   box-shadow: 0 0 16px rgba(249, 115, 22, 0.8);
 }
+
+@media (max-width: 860px) {
+  .dodge-arena {
+    width: min(100%, 430px);
+    height: 100%;
+  }
+}
 </style>

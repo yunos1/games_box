@@ -278,4 +278,15 @@ onUnmounted(() => {
   background: var(--block);
   box-shadow: 0 0 14px color-mix(in srgb, var(--block), transparent 35%);
 }
+
+@media (max-width: 860px) {
+  .tetris-board {
+    width: auto;
+    height: 100%;
+    max-width: min(100%, 330px);
+    max-height: 100%;
+    gap: 2px;
+    padding: 6px;
+  }
+}
 </style>

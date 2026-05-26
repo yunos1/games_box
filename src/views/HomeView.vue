@@ -1,5 +1,5 @@
 <script setup>
-import { computed, ref } from "vue";
+import { computed, ref, watch } from "vue";
 import {
   Brain,
   ChartNoAxesColumn,
@@ -22,10 +22,11 @@ import {
   Trophy,
   Zap,
 } from "lucide-vue-next";
+import { useRoute, useRouter } from "vue-router";
 import GameCard from "../components/GameCard.vue";
 import { games } from "../data/games";
 import { getCampaignSummary, getQuestChain } from "../utils/campaign";
-import { getProgress } from "../utils/storage";
+import { getProgress, getSavedValue, setSavedValue } from "../utils/storage";
 import {
   getDailyChallenge,
   getDailyChallengeStatus,
@@ -50,7 +51,25 @@ const campaignSummary = getCampaignSummary();
 const questChain = getQuestChain();
 const unlockedCount = computed(() => achievements.filter((item) => item.unlocked).length);
 const rewardCount = computed(() => rewards.filter((item) => item.unlocked).length);
-const activeTab = ref("featured");
+const route = useRoute();
+const router = useRouter();
+const HOME_TAB_KEY = "home:active-tab";
+const homeTabIds = new Set(["featured", "all", "action", "puzzle", "strategy", "progress"]);
+const normalizeHomeTab = (value) => {
+  const tab = Array.isArray(value) ? value[0] : value;
+  return typeof tab === "string" && homeTabIds.has(tab) ? tab : "";
+};
+const getInitialTab = () => {
+  const savedTab = getSavedValue(HOME_TAB_KEY, "featured");
+  return normalizeHomeTab(route.query.tab) || normalizeHomeTab(savedTab) || "featured";
+};
+const activeTab = ref(getInitialTab());
+const homeQueryForTab = (tab) => ({ tab });
+const makeGameLink = (routePath) => ({
+  path: routePath,
+  query: { fromTab: activeTab.value },
+});
+const makeHomeLink = (routePath) => (routePath?.startsWith("/game/") ? makeGameLink(routePath) : routePath);
 const searchQuery = ref("");
 const libraryView = ref("grid");
 const progress = getProgress();
@@ -86,7 +105,7 @@ function filterGames(list) {
 const recommendedGames = computed(() => {
   const ids = [challenge.gameId, ...dailyRules.map(({ game }) => game.id)];
   const uniqueIds = [...new Set(ids)];
-  return uniqueIds.map((id) => games.find((game) => game.id === id)).filter(Boolean).slice(0, 6);
+  return uniqueIds.map((id) => games.find((game) => game.id === id)).filter(Boolean).slice(0, 4);
 });
 const actionGames = computed(() => games.filter((game) => actionTags.has(game.tag)));
 const puzzleGames = computed(() => games.filter((game) => puzzleTags.has(game.tag)));
@@ -172,6 +191,20 @@ const tabs = computed(() => [
   { id: "strategy", label: "策略休闲", shortLabel: "策略", icon: Swords, count: strategyCasualGames.value.length },
   { id: "progress", label: "进度", shortLabel: "进度", icon: ChartNoAxesColumn, count: `${starTotal}/${starMax}` },
 ]);
+watch(activeTab, (tab) => {
+  setSavedValue(HOME_TAB_KEY, tab);
+  if (normalizeHomeTab(route.query.tab) !== tab) {
+    router.replace({ path: "/", query: homeQueryForTab(tab) });
+  }
+});
+
+watch(
+  () => route.query.tab,
+  (tab) => {
+    const nextTab = normalizeHomeTab(tab);
+    if (nextTab && nextTab !== activeTab.value) activeTab.value = nextTab;
+  },
+);
 </script>
 
 <template>
@@ -208,7 +241,7 @@ const tabs = computed(() => [
     </nav>
 
     <section v-if="activeTab === 'featured'" class="tab-panel" aria-label="推荐">
-      <section class="home-dashboard platform-dashboard" aria-label="玩家控制台">
+      <section class="home-focus-grid" aria-label="玩家控制台">
         <article class="dashboard-panel daily-panel" :style="{ '--accent': challenge.accent }">
           <div class="panel-title">
             <Target :size="19" />
@@ -220,171 +253,13 @@ const tabs = computed(() => [
             <span>{{ challenge.detail }}</span>
           </div>
           <div class="daily-actions">
-            <RouterLink class="panel-link" :to="challenge.gameRoute">开始挑战</RouterLink>
+            <RouterLink class="panel-link" :to="makeGameLink(challenge.gameRoute)">开始挑战</RouterLink>
             <strong :class="{ done: challengeDone }">{{ challengeDone ? "已完成" : `${challenge.reward} XP` }}</strong>
           </div>
         </article>
-
-        <RouterLink class="dashboard-panel marathon-panel" to="/marathon">
-          <div class="panel-title">
-            <Flag :size="19" />
-            <span>街机马拉松</span>
-          </div>
-          <div class="marathon-core">
-            <h2>今日 5 连战</h2>
-            <p>按当天路线连续挑战 5 款游戏，完成后可重置再跑一轮。</p>
-          </div>
-          <div class="marathon-tags">
-            <span>每日路线</span>
-            <span>本地存档</span>
-            <span>手动结算</span>
-          </div>
-        </RouterLink>
-
-        <RouterLink
-          class="dashboard-panel campaign-panel"
-          to="/campaign"
-          :style="{ '--accent': campaignSummary.nextNode?.game.accent || '#53f3ff' }"
-        >
-          <div class="panel-title">
-            <Flag :size="19" />
-            <span>关卡地图</span>
-          </div>
-          <div class="campaign-panel-core">
-            <h2>{{ campaignSummary.nextNode?.game.title || "路线已点亮" }}</h2>
-            <p>
-              {{ campaignSummary.nextNode ? `下一关：${campaignSummary.nextNode.game.description}` : "所有路线都已打卡，可以回去补满星。" }}
-            </p>
-          </div>
-          <div class="campaign-panel-meter" aria-hidden="true">
-            <span :style="{ width: `${campaignSummary.percent}%` }"></span>
-          </div>
-          <div class="marathon-tags">
-            <span>{{ campaignSummary.completed }}/{{ campaignSummary.total }}</span>
-            <span>{{ campaignSummary.stars }}/{{ campaignSummary.totalStars }} 星</span>
-          </div>
-        </RouterLink>
       </section>
 
-      <section class="smart-dashboard" aria-label="智能入口">
-        <RouterLink
-          v-if="lastPlayedGame"
-          class="dashboard-panel smart-card"
-          :to="lastPlayedGame.route"
-          :style="{ '--accent': lastPlayedGame.accent }"
-        >
-          <div class="panel-title">
-            <Clock3 :size="19" />
-            <span>继续上次</span>
-          </div>
-          <h2>{{ lastPlayedGame.title }}</h2>
-          <p>{{ lastPlayedGame.description }}</p>
-          <strong>继续挑战</strong>
-        </RouterLink>
-        <article v-else class="dashboard-panel smart-card" :style="{ '--accent': challenge.accent }">
-          <div class="panel-title">
-            <Clock3 :size="19" />
-            <span>继续上次</span>
-          </div>
-          <h2>还没有记录</h2>
-          <p>先完成任意一局，这里会自动出现最近游玩的入口。</p>
-          <strong>等待首局</strong>
-        </article>
-
-        <RouterLink
-          v-if="starFocus"
-          class="dashboard-panel smart-card"
-          :to="starFocus.game.route"
-          :style="{ '--accent': starFocus.game.accent }"
-        >
-          <div class="panel-title">
-            <Compass :size="19" />
-            <span>星级冲刺</span>
-          </div>
-          <h2>{{ starFocus.game.title }}</h2>
-          <p>已点亮 {{ starFocus.stars }}/{{ starFocus.total }} 星，再拿 {{ starFocus.remaining }} 星就能补完。</p>
-          <strong>冲刺星级</strong>
-        </RouterLink>
-
-        <article class="dashboard-panel smart-card daily-progress-card" :style="{ '--accent': '#7dff6f' }">
-          <div class="panel-title">
-            <Target :size="19" />
-            <span>今日进度</span>
-          </div>
-          <h2>{{ dailyProgress.done }}/{{ dailyProgress.total }}</h2>
-          <p>今日挑战和规则变体会一起计入当天进度。</p>
-          <div class="smart-meter" aria-hidden="true">
-            <span :style="{ width: `${dailyProgress.percent}%` }"></span>
-          </div>
-        </article>
-      </section>
-
-      <section v-if="recentlyPlayedGames.length" class="recent-strip" aria-label="最近玩过">
-        <span><Clock3 :size="16" />最近玩过</span>
-        <RouterLink v-for="game in recentlyPlayedGames" :key="game.id" :to="game.route" :style="{ '--accent': game.accent }">
-          {{ game.title }}
-        </RouterLink>
-      </section>
-
-      <section class="quest-strip" aria-label="任务链">
-        <RouterLink
-          v-for="quest in questChain"
-          :key="quest.id"
-          class="dashboard-panel quest-mini-card"
-          :class="{ done: quest.done }"
-          :to="quest.route"
-          :style="{ '--accent': quest.accent }"
-        >
-          <div class="panel-title">
-            <CheckCircle2 v-if="quest.done" :size="18" />
-            <Circle v-else :size="18" />
-            <span>{{ quest.title }}</span>
-          </div>
-          <p>{{ quest.detail }}</p>
-          <strong>{{ quest.progress }}</strong>
-        </RouterLink>
-      </section>
-
-      <section class="route-dashboard" aria-label="玩法路线">
-        <article
-          v-for="route in playRoutes"
-          :key="route.id"
-          class="dashboard-panel route-card"
-          :style="{ '--accent': route.accent }"
-        >
-          <div class="panel-title">
-            <component :is="route.icon" :size="19" />
-            <span>{{ route.title }}</span>
-          </div>
-          <p>{{ route.detail }}</p>
-          <div class="route-game-list">
-            <RouterLink v-for="game in route.games" :key="game.id" :to="game.route" :style="{ '--accent': game.accent }">
-              <img :src="game.icon" alt="" />
-              <span>{{ game.title }}</span>
-            </RouterLink>
-          </div>
-        </article>
-      </section>
-
-      <section class="rule-dashboard" aria-label="今日规则变体">
-        <RouterLink
-          v-for="{ game, variant } in dailyRules"
-          :key="`${game.id}-${variant.id}`"
-          class="dashboard-panel rule-card"
-          :class="{ done: getDailyVariantStatus(game.id) }"
-          :style="{ '--accent': game.accent }"
-          :to="game.route"
-        >
-          <div class="panel-title">
-            <Sparkles :size="19" />
-            <span>{{ game.title }}</span>
-          </div>
-          <strong>{{ getDailyVariantStatus(game.id) ? "已完成" : variant.title }}</strong>
-          <span>{{ variant.detail }}</span>
-        </RouterLink>
-      </section>
-
-      <section class="tab-section-heading">
+      <section class="tab-section-heading featured-heading">
         <div>
           <p class="eyebrow">QUICK START</p>
           <h2>今日推荐</h2>
@@ -398,8 +273,155 @@ const tabs = computed(() => [
           :game="game"
           :index="index"
           :status="gameCardStatus(game)"
+          :from-tab="activeTab"
         />
       </section>
+
+      <details class="home-more-panel">
+        <summary>
+          <span>更多入口</span>
+          <strong>继续 / 最近 / 马拉松 / 任务</strong>
+        </summary>
+
+        <section class="home-status-grid" aria-label="继续与进度">
+          <RouterLink
+            v-if="lastPlayedGame"
+            class="dashboard-panel smart-card compact-smart-card"
+            :to="makeGameLink(lastPlayedGame.route)"
+            :style="{ '--accent': lastPlayedGame.accent }"
+          >
+            <div class="panel-title">
+              <Clock3 :size="19" />
+              <span>继续上次</span>
+            </div>
+            <h2>{{ lastPlayedGame.title }}</h2>
+            <strong>继续挑战</strong>
+          </RouterLink>
+          <article v-else class="dashboard-panel smart-card compact-smart-card" :style="{ '--accent': challenge.accent }">
+            <div class="panel-title">
+              <Clock3 :size="19" />
+              <span>继续上次</span>
+            </div>
+            <h2>还没有记录</h2>
+            <strong>等待首局</strong>
+          </article>
+
+          <article class="dashboard-panel smart-card compact-smart-card daily-progress-card" :style="{ '--accent': '#7dff6f' }">
+            <div class="panel-title">
+              <Target :size="19" />
+              <span>今日进度</span>
+            </div>
+            <h2>{{ dailyProgress.done }}/{{ dailyProgress.total }}</h2>
+            <div class="smart-meter" aria-hidden="true">
+              <span :style="{ width: `${dailyProgress.percent}%` }"></span>
+            </div>
+          </article>
+        </section>
+
+        <section v-if="recentlyPlayedGames.length" class="recent-strip" aria-label="最近玩过">
+          <span><Clock3 :size="16" />最近玩过</span>
+          <RouterLink v-for="game in recentlyPlayedGames" :key="game.id" :to="makeGameLink(game.route)" :style="{ '--accent': game.accent }">
+            {{ game.title }}
+          </RouterLink>
+        </section>
+
+        <section class="home-dashboard platform-dashboard compact-home-dashboard" aria-label="进阶入口">
+          <RouterLink class="dashboard-panel marathon-panel" to="/marathon">
+            <div class="panel-title">
+              <Flag :size="19" />
+              <span>街机马拉松</span>
+            </div>
+            <div class="marathon-core">
+              <h2>今日 5 连战</h2>
+              <p>按当天路线连续挑战 5 款游戏。</p>
+            </div>
+          </RouterLink>
+
+          <RouterLink
+            class="dashboard-panel campaign-panel"
+            to="/campaign"
+            :style="{ '--accent': campaignSummary.nextNode?.game.accent || '#53f3ff' }"
+          >
+            <div class="panel-title">
+              <Flag :size="19" />
+              <span>关卡地图</span>
+            </div>
+            <div class="campaign-panel-core">
+              <h2>{{ campaignSummary.nextNode?.game.title || "路线已点亮" }}</h2>
+              <p>{{ campaignSummary.completed }}/{{ campaignSummary.total }} 关 · {{ campaignSummary.stars }}/{{ campaignSummary.totalStars }} 星</p>
+            </div>
+          </RouterLink>
+
+          <RouterLink
+            v-if="starFocus"
+            class="dashboard-panel smart-card compact-smart-card"
+            :to="makeGameLink(starFocus.game.route)"
+            :style="{ '--accent': starFocus.game.accent }"
+          >
+            <div class="panel-title">
+              <Compass :size="19" />
+              <span>星级冲刺</span>
+            </div>
+            <h2>{{ starFocus.game.title }}</h2>
+            <strong>{{ starFocus.stars }}/{{ starFocus.total }} 星</strong>
+          </RouterLink>
+        </section>
+
+        <section class="quest-strip" aria-label="任务链">
+          <RouterLink
+            v-for="quest in questChain"
+            :key="quest.id"
+            class="dashboard-panel quest-mini-card"
+            :class="{ done: quest.done }"
+            :to="makeHomeLink(quest.route)"
+            :style="{ '--accent': quest.accent }"
+          >
+            <div class="panel-title">
+              <CheckCircle2 v-if="quest.done" :size="18" />
+              <Circle v-else :size="18" />
+              <span>{{ quest.title }}</span>
+            </div>
+            <strong>{{ quest.progress }}</strong>
+          </RouterLink>
+        </section>
+
+        <section class="route-dashboard" aria-label="玩法路线">
+          <article
+            v-for="route in playRoutes"
+            :key="route.id"
+            class="dashboard-panel route-card"
+            :style="{ '--accent': route.accent }"
+          >
+            <div class="panel-title">
+              <component :is="route.icon" :size="19" />
+              <span>{{ route.title }}</span>
+            </div>
+            <div class="route-game-list">
+              <RouterLink v-for="game in route.games" :key="game.id" :to="makeGameLink(game.route)" :style="{ '--accent': game.accent }">
+                <img :src="game.icon" alt="" />
+                <span>{{ game.title }}</span>
+              </RouterLink>
+            </div>
+          </article>
+        </section>
+
+        <section class="rule-dashboard" aria-label="今日规则变体">
+          <RouterLink
+            v-for="{ game, variant } in dailyRules"
+            :key="`${game.id}-${variant.id}`"
+            class="dashboard-panel rule-card"
+            :class="{ done: getDailyVariantStatus(game.id) }"
+            :style="{ '--accent': game.accent }"
+            :to="makeGameLink(game.route)"
+          >
+            <div class="panel-title">
+              <Sparkles :size="19" />
+              <span>{{ game.title }}</span>
+            </div>
+            <strong>{{ getDailyVariantStatus(game.id) ? "已完成" : variant.title }}</strong>
+          </RouterLink>
+        </section>
+      </details>
     </section>
 
     <section v-else-if="activeLibrary" class="tab-panel" :aria-label="activeLibrary.title">
@@ -449,6 +471,7 @@ const tabs = computed(() => [
           :index="index"
           :compact="libraryView === 'list'"
           :status="gameCardStatus(game)"
+          :from-tab="activeTab"
         />
       </section>
       <div v-else class="empty-state library-empty">没有匹配的游戏</div>

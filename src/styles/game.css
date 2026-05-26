@@ -1,11 +1,16 @@
 .game-shell {
+  height: 100vh;
   min-height: 100vh;
+  overflow: hidden;
   padding: 24px;
 }
 
 .game-frame {
+  display: flex;
+  flex-direction: column;
   width: min(1100px, 100%);
-  min-height: calc(100vh - 48px);
+  height: 100%;
+  min-height: 0;
   margin: 0 auto;
   border: 1px solid rgba(145, 235, 255, 0.22);
   border-radius: var(--radius);
@@ -77,11 +82,16 @@
   background: rgba(9, 23, 48, 0.92);
 }
 
-.game-info-row {
+.game-hud-row {
   display: flex;
   flex-wrap: wrap;
   gap: 10px;
+  align-items: flex-start;
   padding: 14px 16px 0;
+}
+
+.game-info-row {
+  display: contents;
 }
 
 .stat-chip,
@@ -113,14 +123,12 @@
 }
 
 .game-meta-row {
-  display: grid;
-  grid-template-columns: minmax(260px, 0.92fr) minmax(0, 1.08fr);
-  gap: 12px;
-  padding: 12px 16px 0;
+  display: contents;
 }
 
 .game-rule-card,
 .game-star-card {
+  flex: 1 1 220px;
   min-width: 0;
   padding: 12px;
   border: 1px solid rgba(145, 235, 255, 0.18);
@@ -151,6 +159,12 @@
   display: none;
 }
 
+.game-meta-card:not([open]) {
+  flex: 0 0 auto;
+  padding: 7px 12px;
+  border-radius: 999px;
+}
+
 .mini-panel-title {
   display: flex;
   align-items: center;
@@ -171,6 +185,10 @@
   margin-left: auto;
   color: var(--yellow);
   font-weight: 900;
+}
+
+.game-meta-card:not([open]) .mini-panel-title span {
+  margin-left: 8px;
 }
 
 .game-rule-card.done .mini-panel-title span {
@@ -234,22 +252,31 @@
 }
 
 .game-content {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
   padding: 16px;
 }
 
 .game-panel {
   display: grid;
+  height: 100%;
+  min-height: 0;
   gap: 16px;
   align-items: start;
 }
 
 .split-panel {
-  grid-template-columns: minmax(0, 1fr) 280px;
+  grid-template-columns: minmax(0, 1fr) minmax(240px, 280px);
 }
 
 .control-panel {
   display: grid;
+  align-content: start;
   gap: 12px;
+  min-height: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
   padding: 16px;
   border: 1px solid rgba(145, 235, 255, 0.18);
   border-radius: var(--radius);
@@ -311,6 +338,8 @@
 .board-shell {
   display: grid;
   place-items: center;
+  min-width: 0;
+  min-height: 0;
   min-height: 420px;
   border: 1px solid rgba(145, 235, 255, 0.16);
   border-radius: var(--radius);
@@ -320,12 +349,18 @@
     rgba(5, 10, 22, 0.78);
   background-size: 28px 28px;
   overflow: hidden;
+  padding: 12px;
   touch-action: none;
+}
+
+.board-shell > * {
+  max-width: 100%;
+  max-height: 100%;
 }
 
 .canvas-board {
   width: min(100%, 720px);
-  max-height: min(70vh, 620px);
+  max-height: min(100%, 70vh, 620px);
   border: 1px solid rgba(145, 235, 255, 0.26);
   border-radius: var(--radius);
   background: #020611;
@@ -750,17 +785,22 @@
 
 @media (max-width: 860px) {
   .game-shell {
+    height: 100svh;
+    min-height: 100svh;
     padding: 6px;
   }
 
   .game-frame {
-    min-height: calc(100vh - 12px);
-    min-height: calc(100svh - 12px);
     border-radius: 10px;
+  }
+
+  .game-frame:has(.split-panel) .game-info-row {
+    display: none;
   }
 
   .split-panel {
     grid-template-columns: 1fr;
+    grid-template-rows: minmax(0, 1fr) minmax(112px, auto);
     gap: 8px;
   }
 
@@ -771,13 +811,18 @@
   }
 
   .game-mini-icon {
+    width: 30px;
+    height: 30px;
+  }
+
+  .icon-button {
     width: 34px;
     height: 34px;
   }
 
-  .icon-button {
-    width: 36px;
-    height: 36px;
+  .game-hud-row {
+    gap: 6px;
+    padding: 8px 8px 0;
   }
 
   .game-info-row {
@@ -794,18 +839,18 @@
   }
 
   .game-content {
-    padding: 8px;
+    padding: 6px;
   }
 
   .game-meta-row {
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 6px;
-    padding: 8px 8px 0;
+    padding: 6px 6px 0;
   }
 
   .game-rule-card,
   .game-star-card {
-    padding: 8px;
+    padding: 6px;
     border-radius: 10px;
   }
 
@@ -824,11 +869,11 @@
   }
 
   .game-meta-card:not([open]) {
-    min-height: 38px;
+    min-height: 32px;
   }
 
   .game-meta-card:not([open]) .mini-panel-title {
-    min-height: 20px;
+    min-height: 18px;
   }
 
   .game-rule-card p {
@@ -852,17 +897,33 @@
   }
 
   .game-panel {
-    gap: 8px;
+    align-items: stretch;
+    gap: 6px;
   }
 
   .control-panel {
-    gap: 8px;
-    padding: 10px;
+    grid-template-columns: 1fr;
+    gap: 7px;
+    max-height: min(28svh, 190px);
+    padding: 8px;
+    border-radius: 10px;
+  }
+
+  .control-panel h2,
+  .control-panel h3 {
+    font-size: 0.92rem;
   }
 
   .control-panel p {
     font-size: 0.82rem;
     line-height: 1.45;
+  }
+
+  .d-pad {
+    grid-template-columns: repeat(3, 46px);
+    grid-template-rows: repeat(3, 38px);
+    gap: 6px;
+    margin-top: 0;
   }
 
   .segmented {
@@ -875,9 +936,15 @@
   }
 
   .board-shell {
-    min-height: 360px;
-    min-height: clamp(360px, 60svh, 620px);
+    height: 100%;
+    min-height: 0;
+    padding: 6px;
     border-radius: 10px;
+  }
+
+  .board-shell > * {
+    max-width: 100%;
+    max-height: 100%;
   }
 }
 
@@ -887,7 +954,7 @@
   }
 
   .game-title-wrap h1 {
-    font-size: 1.24rem;
+    font-size: 1.08rem;
   }
 
   .game-title-wrap {
@@ -898,8 +965,13 @@
     gap: 6px;
   }
 
+  .game-topbar {
+    padding: 6px;
+  }
+
   .game-meta-row {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+    padding-top: 5px;
   }
 
   .mini-panel-title strong {
@@ -907,7 +979,30 @@
   }
 
   .canvas-board {
-    max-height: 70vh;
-    max-height: min(70svh, 620px);
+    max-height: min(100%, 70svh, 620px);
+  }
+}
+
+@media (max-width: 430px), (max-height: 720px) {
+  .game-frame:has(.split-panel) .game-meta-row {
+    display: none;
+  }
+
+  .split-panel {
+    grid-template-rows: minmax(0, 1fr) minmax(96px, auto);
+  }
+
+  .control-panel {
+    max-height: min(24svh, 150px);
+  }
+
+  .control-panel p {
+    font-size: 0.76rem;
+    line-height: 1.35;
+  }
+
+  .d-pad {
+    grid-template-columns: repeat(3, 42px);
+    grid-template-rows: repeat(3, 34px);
   }
 }

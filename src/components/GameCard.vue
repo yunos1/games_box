@@ -21,17 +21,29 @@ const props = defineProps({
     type: Object,
     default: null,
   },
+  fromTab: {
+    type: String,
+    default: "",
+  },
 });
 
 const starSummary = computed(() => getGameStarSummary(props.game.id));
 const dailyVariant = computed(() => getDailyVariantForGame(props.game.id));
+const linkTarget = computed(() =>
+  props.fromTab
+    ? {
+        path: props.game.route,
+        query: { fromTab: props.fromTab },
+      }
+    : props.game.route,
+);
 </script>
 
 <template>
   <RouterLink
     class="game-card"
     :class="{ compact }"
-    :to="game.route"
+    :to="linkTarget"
     :style="{ '--accent': game.accent, '--delay': `${index * 55}ms` }"
   >
     <div class="card-orbit" aria-hidden="true"></div>

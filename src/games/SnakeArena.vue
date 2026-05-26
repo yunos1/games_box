@@ -238,7 +238,8 @@ function loop(time) {
 }
 
 function resize() {
-  const displaySize = Math.min(canvas.value.parentElement.clientWidth - 24, 620);
+  const parent = canvas.value.parentElement;
+  const displaySize = Math.min(parent.clientWidth - 12, parent.clientHeight - 12, 620);
   canvas.value.style.width = `${displaySize}px`;
   canvas.value.style.height = `${displaySize}px`;
 }

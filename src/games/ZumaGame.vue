@@ -433,4 +433,53 @@ onUnmounted(() => window.clearInterval(timer));
   align-items: center;
   gap: 14px;
 }
+
+@media (max-width: 860px) {
+  .zuma-stage {
+    width: 100%;
+    height: 100%;
+    min-height: 0;
+    align-content: center;
+    gap: 12px;
+    padding: 10px;
+  }
+
+  .zuma-track {
+    min-height: 0;
+    max-height: 100%;
+    gap: 5px;
+    padding: 10px;
+  }
+
+  .zuma-ball,
+  .zuma-slot,
+  .zuma-core {
+    width: 28px;
+  }
+
+  .zuma-core.large {
+    width: 42px;
+  }
+
+  .zuma-ray {
+    height: 38px;
+  }
+}
+
+@media (max-width: 430px), (max-height: 720px) {
+  .zuma-stage {
+    gap: 8px;
+    padding: 8px;
+  }
+
+  .zuma-track {
+    padding: 8px;
+  }
+
+  .zuma-ball,
+  .zuma-slot,
+  .zuma-core {
+    width: 24px;
+  }
+}
 </style>

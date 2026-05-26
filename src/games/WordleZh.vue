@@ -548,11 +548,70 @@ onBeforeUnmount(clearCelebrationTimer);
 
 @media (max-width: 860px) {
   .wordle-play-area {
-    padding: 12px;
+    height: 100%;
+    gap: 8px;
+    align-content: start;
+    overflow: auto;
+    overscroll-behavior: contain;
+    padding: 8px;
+  }
+
+  .wordle-intro {
+    gap: 5px;
+    padding: 8px;
+  }
+
+  .wordle-intro p,
+  .wordle-legend {
+    display: none;
+  }
+
+  .wordle-clue-box {
+    gap: 6px;
+    padding: 8px;
+  }
+
+  .wordle-clue-box ul {
+    gap: 4px;
+    line-height: 1.35;
+    font-size: 0.82rem;
   }
 
   .wordle-form {
     grid-template-columns: 1fr;
+    gap: 7px;
+  }
+
+  .wordle-board {
+    width: min(100%, 260px);
+    gap: 5px;
+  }
+
+  .wordle-row {
+    gap: 5px;
+  }
+
+  .wordle-cell {
+    border-radius: 8px;
+    font-size: 1.35rem;
+  }
+}
+
+@media (max-width: 430px), (max-height: 720px) {
+  .wordle-intro {
+    display: none;
+  }
+
+  .wordle-clue-box li:not(:first-child) {
+    display: none;
+  }
+
+  .wordle-board {
+    width: min(100%, 224px);
+  }
+
+  .wordle-cell {
+    font-size: 1.12rem;
   }
 }
 </style>

@@ -1,7 +1,9 @@
 <script setup>
 import { computed, onMounted, onUnmounted, ref } from "vue";
+import { ChevronDown, Gamepad2, Settings } from "lucide-vue-next";
 import GameLayout from "../components/GameLayout.vue";
 import { createSwipeHandlers } from "../utils/touch";
+import { SNAKE_FOODS } from "../data/snakeFoods";
 import { SNAKE_SKINS, getSnakeSkinById } from "../data/snakeSkins";
 import { getBestScore, getSavedValue, setBestScore, setSavedValue } from "../utils/storage";
 import { getDailyVariantForGame, recordGameResult } from "../utils/progress";
@@ -18,7 +20,8 @@ const selectedSkin = computed(() => getSnakeSkinById(selectedSkinId.value));
 const dailyVariant = getDailyVariantForGame("snake");
 const variantEffect = dailyVariant?.effect || "";
 
-const grid = 22;
+const gridCols = 22;
+let gridRows = 22;
 let ctx;
 let snake;
 let food;
@@ -30,6 +33,9 @@ let gameOver = false;
 let foodsEaten = 0;
 let maxLength = 3;
 let runNewGoalIds = new Set();
+const foodImages = new Map();
+let foodBag = [];
+let lastFoodId = "";
 
 function selectSkin(id) {
   selectedSkinId.value = id;
@@ -37,14 +43,39 @@ function selectSkin(id) {
   draw();
 }
 
+function shuffleFoods() {
+  const foods = [...SNAKE_FOODS];
+  for (let i = foods.length - 1; i > 0; i -= 1) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [foods[i], foods[j]] = [foods[j], foods[i]];
+  }
+  if (foods[0]?.id === lastFoodId && foods.length > 1) {
+    [foods[0], foods[1]] = [foods[1], foods[0]];
+  }
+  foodBag = foods;
+}
+
+function nextFoodAsset() {
+  if (!foodBag.length) shuffleFoods();
+  const nextFood = foodBag.shift() || SNAKE_FOODS[0];
+  lastFoodId = nextFood.id;
+  return nextFood;
+}
+
 function placeFood() {
+  let x;
+  let y;
   do {
-    food = {
-      x: Math.floor(Math.random() * grid),
-      y: Math.floor(Math.random() * grid),
-      kind: variantEffect === "golden-food" && (foodsEaten + 1) % 4 === 0 ? "gold" : "normal",
-    };
-  } while (snake.some((part) => part.x === food.x && part.y === food.y));
+    x = Math.floor(Math.random() * gridCols);
+    y = Math.floor(Math.random() * gridRows);
+  } while (snake.some((part) => part.x === x && part.y === y));
+
+  food = {
+    x,
+    y,
+    kind: variantEffect === "golden-food" && (foodsEaten + 1) % 4 === 0 ? "gold" : "normal",
+    asset: nextFoodAsset(),
+  };
 }
 
 function syncProgress() {
@@ -78,10 +109,12 @@ function showRunResult(title, detail) {
 }
 
 function restart() {
+  const startY = Math.floor(gridRows / 2);
+  const startX = Math.floor(gridCols / 2);
   snake = [
-    { x: 10, y: 11 },
-    { x: 9, y: 11 },
-    { x: 8, y: 11 },
+    { x: startX, y: startY },
+    { x: startX - 1, y: startY },
+    { x: startX - 2, y: startY },
   ];
   direction = { x: 1, y: 0 };
   nextDirection = { x: 1, y: 0 };
@@ -90,6 +123,8 @@ function restart() {
   runNewGoalIds = new Set();
   foodsEaten = 0;
   maxLength = snake.length;
+  lastFoodId = "";
+  shuffleFoods();
   status.value =
     variantEffect === "turbo"
       ? "高速核心：节奏更快，得分更高"
@@ -124,13 +159,13 @@ function step() {
   };
   if (variantEffect === "wrap-walls") {
     head = {
-      x: (head.x + grid) % grid,
-      y: (head.y + grid) % grid,
+      x: (head.x + gridCols) % gridCols,
+      y: (head.y + gridRows) % gridRows,
     };
   }
 
   if (
-    (variantEffect !== "wrap-walls" && (head.x < 0 || head.y < 0 || head.x >= grid || head.y >= grid)) ||
+    (variantEffect !== "wrap-walls" && (head.x < 0 || head.y < 0 || head.x >= gridCols || head.y >= gridRows)) ||
     snake.some((part) => part.x === head.x && part.y === head.y)
   ) {
     gameOver = true;
@@ -153,14 +188,19 @@ function step() {
   }
 }
 
-function drawGrid(width, cell) {
+function drawGrid(width, height, cell) {
   ctx.strokeStyle = "rgba(83, 243, 255, 0.06)";
   ctx.lineWidth = 1;
-  for (let i = 0; i <= grid; i += 1) {
-    const p = i * cell;
+  for (let x = 0; x <= gridCols; x += 1) {
+    const p = x * cell;
     ctx.beginPath();
     ctx.moveTo(p, 0);
-    ctx.lineTo(p, width);
+    ctx.lineTo(p, height);
+    ctx.stroke();
+  }
+  for (let y = 0; y <= gridRows; y += 1) {
+    const p = y * cell;
+    ctx.beginPath();
     ctx.moveTo(0, p);
     ctx.lineTo(width, p);
     ctx.stroke();
@@ -285,7 +325,7 @@ function drawSkinPattern(skin, x, y, size, index) {
 }
 
 function drawSnakePart(part, index, cell, skin) {
-  const gap = Math.max(2, cell * 0.08);
+  const gap = Math.max(1.2, cell * 0.035);
   const x = part.x * cell + gap;
   const y = part.y * cell + gap;
   const size = cell - gap * 2;
@@ -345,22 +385,61 @@ function drawSnakePart(part, index, cell, skin) {
   ctx.restore();
 }
 
-function draw() {
-  if (!canvas.value) return;
-  const width = canvas.value.width;
-  const cell = width / grid;
-  const skin = selectedSkin.value;
-  ctx.clearRect(0, 0, width, width);
-  ctx.fillStyle = "#020611";
-  ctx.fillRect(0, 0, width, width);
-  drawGrid(width, cell);
+function getFoodImage(foodAsset) {
+  if (!foodAsset?.image || typeof Image === "undefined") return null;
+  if (!foodImages.has(foodAsset.image)) {
+    const image = new Image();
+    image.onload = () => draw();
+    image.src = foodAsset.image;
+    foodImages.set(foodAsset.image, image);
+  }
+  const image = foodImages.get(foodAsset.image);
+  return image.complete && image.naturalWidth ? image : null;
+}
 
-  ctx.shadowBlur = 18;
+function drawFood(cell) {
+  const image = getFoodImage(food.asset);
+  const centerX = food.x * cell + cell / 2;
+  const centerY = food.y * cell + cell / 2;
+  const imageSize = cell * (food.kind === "gold" ? 1.24 : 1.12);
+
+  ctx.save();
+  ctx.shadowBlur = food.kind === "gold" ? 24 : 18;
   ctx.shadowColor = food.kind === "gold" ? "#facc15" : "#ffd166";
-  ctx.fillStyle = food.kind === "gold" ? "#facc15" : "#ffd166";
-  ctx.beginPath();
-  ctx.arc(food.x * cell + cell / 2, food.y * cell + cell / 2, cell * (food.kind === "gold" ? 0.42 : 0.32), 0, Math.PI * 2);
-  ctx.fill();
+
+  if (image) {
+    ctx.drawImage(image, centerX - imageSize / 2, centerY - imageSize / 2, imageSize, imageSize);
+  } else {
+    ctx.fillStyle = food.kind === "gold" ? "#facc15" : "#ffd166";
+    ctx.beginPath();
+    ctx.arc(centerX, centerY, cell * (food.kind === "gold" ? 0.5 : 0.42), 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  if (food.kind === "gold") {
+    ctx.shadowBlur = 0;
+    ctx.strokeStyle = "rgba(255, 255, 255, 0.66)";
+    ctx.lineWidth = Math.max(1.4, cell * 0.045);
+    ctx.beginPath();
+    ctx.arc(centerX, centerY, cell * 0.48, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+
+  ctx.restore();
+}
+
+function draw() {
+  if (!canvas.value || !snake || !food) return;
+  const width = canvas.value.clientWidth || canvas.value.width;
+  const height = canvas.value.clientHeight || canvas.value.height;
+  const cell = width / gridCols;
+  const skin = selectedSkin.value;
+  ctx.clearRect(0, 0, width, height);
+  ctx.fillStyle = "#020611";
+  ctx.fillRect(0, 0, width, height);
+  drawGrid(width, height, cell);
+
+  drawFood(cell);
 
   [...snake].reverse().forEach((part, reversedIndex) => {
     drawSnakePart(part, snake.length - 1 - reversedIndex, cell, skin);
@@ -369,9 +448,8 @@ function draw() {
 }
 
 function loop(time) {
-  const baseSpeed = variantEffect === "turbo" ? 108 : 150;
-  const minSpeed = variantEffect === "turbo" ? 62 : 80;
-  if (time - lastTick > Math.max(minSpeed, baseSpeed - score.value * 0.55)) {
+  const tickSpeed = variantEffect === "turbo" ? 108 : 150;
+  if (time - lastTick > tickSpeed) {
     step();
     draw();
     lastTick = time;
@@ -381,16 +459,20 @@ function loop(time) {
 
 function resize() {
   if (!canvas.value) return;
-  const size = Math.min(canvas.value.parentElement.clientWidth - 24, 620);
+  const parent = canvas.value.parentElement;
+  const availableWidth = Math.max(280, Math.min(parent.clientWidth - 8, 820));
+  const availableHeight = Math.max(280, parent.clientHeight - 8);
+  const cell = availableWidth / gridCols;
+  gridRows = Math.max(12, Math.floor(availableHeight / cell));
+  const width = Math.floor(gridCols * cell);
+  const height = Math.floor(gridRows * cell);
   const pixelRatio = window.devicePixelRatio || 1;
-  canvas.value.style.width = `${size}px`;
-  canvas.value.style.height = `${size}px`;
-  canvas.value.width = Math.floor(size * pixelRatio);
-  canvas.value.height = Math.floor(size * pixelRatio);
+  canvas.value.style.width = `${width}px`;
+  canvas.value.style.height = `${height}px`;
+  canvas.value.width = Math.floor(width * pixelRatio);
+  canvas.value.height = Math.floor(height * pixelRatio);
   ctx = canvas.value.getContext("2d");
   ctx.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);
-  canvas.value.width = size;
-  canvas.value.height = size;
   draw();
 }
 
@@ -423,8 +505,8 @@ const swipe = createSwipeHandlers(setDirection);
 
 onMounted(() => {
   ctx = canvas.value.getContext("2d");
-  restart();
   resize();
+  restart();
   window.addEventListener("resize", resize);
   window.addEventListener("keydown", onKey);
   loopId = requestAnimationFrame(loop);
@@ -439,6 +521,7 @@ onUnmounted(() => {
 
 <template>
   <GameLayout
+    class="snake-layout"
     game-id="snake"
     :score="score"
     :best="best"
@@ -451,49 +534,162 @@ onUnmounted(() => {
     @toggle-pause="togglePause"
     @dismiss-result="runResult = null"
   >
-    <section class="game-panel split-panel">
-      <div class="board-shell" @touchstart.passive="swipe.onTouchStart" @touchend.passive="swipe.onTouchEnd" @touchmove.prevent>
+    <section class="game-panel split-panel snake-play-panel">
+      <div
+        class="board-shell snake-board-shell"
+        @touchstart.passive="swipe.onTouchStart"
+        @touchend.passive="swipe.onTouchEnd"
+        @touchmove.prevent
+      >
         <canvas ref="canvas" class="canvas-board" aria-label="贪吃蛇游戏画布"></canvas>
       </div>
-      <aside class="control-panel">
-        <h2>操作</h2>
-        <p>方向键或 WASD 控制，空格暂停。移动端在画布区域滑动。</p>
-        <div class="d-pad">
-          <button class="up" type="button" @click="setDirection('up')">↑</button>
-          <button class="left" type="button" @click="setDirection('left')">←</button>
-          <button class="center" type="button" @click="togglePause">{{ paused ? "▶" : "Ⅱ" }}</button>
-          <button class="right" type="button" @click="setDirection('right')">→</button>
-          <button class="down" type="button" @click="setDirection('down')">↓</button>
-        </div>
-        <h3>皮肤</h3>
-        <div class="snake-skin-grid" role="list" aria-label="贪吃蛇皮肤">
-          <button
-            v-for="skin in SNAKE_SKINS"
-            :key="skin.id"
-            class="snake-skin-option"
-            :class="{ active: selectedSkinId === skin.id }"
-            :style="{ '--skin': skin.body, '--skin-alt': skin.bodyAlt, '--skin-glow': skin.glow }"
-            type="button"
-            role="listitem"
-            :aria-pressed="selectedSkinId === skin.id"
-            @click="selectSkin(skin.id)"
-          >
-            <img :src="skin.preview" alt="" />
-            <span>
-              <strong>{{ skin.name }}</strong>
-              <small>{{ skin.subtitle }}</small>
-            </span>
-          </button>
-        </div>
+      <aside class="control-panel snake-side-panel">
+        <details class="snake-drawer">
+          <summary>
+            <Gamepad2 :size="18" />
+            <span>操作</span>
+            <ChevronDown class="drawer-chevron" :size="17" />
+          </summary>
+          <p>方向键或 WASD 控制，空格暂停。移动端在画布区域滑动。</p>
+          <div class="d-pad">
+            <button class="up" type="button" aria-label="向上" @click="setDirection('up')">↑</button>
+            <button class="left" type="button" aria-label="向左" @click="setDirection('left')">←</button>
+            <button class="center" type="button" :aria-label="paused ? '继续' : '暂停'" @click="togglePause">
+              {{ paused ? "▶" : "Ⅱ" }}
+            </button>
+            <button class="right" type="button" aria-label="向右" @click="setDirection('right')">→</button>
+            <button class="down" type="button" aria-label="向下" @click="setDirection('down')">↓</button>
+          </div>
+        </details>
+
+        <details class="snake-drawer">
+          <summary>
+            <Settings :size="18" />
+            <span>设置</span>
+            <ChevronDown class="drawer-chevron" :size="17" />
+          </summary>
+          <div class="snake-skin-grid" role="list" aria-label="贪吃蛇皮肤">
+            <button
+              v-for="skin in SNAKE_SKINS"
+              :key="skin.id"
+              class="snake-skin-option"
+              :class="{ active: selectedSkinId === skin.id }"
+              :style="{ '--skin': skin.body, '--skin-alt': skin.bodyAlt, '--skin-glow': skin.glow }"
+              type="button"
+              role="listitem"
+              :aria-pressed="selectedSkinId === skin.id"
+              @click="selectSkin(skin.id)"
+            >
+              <img :src="skin.preview" alt="" />
+              <span>
+                <strong>{{ skin.name }}</strong>
+                <small>{{ skin.subtitle }}</small>
+              </span>
+            </button>
+          </div>
+        </details>
       </aside>
     </section>
   </GameLayout>
 </template>
 
 <style scoped>
+:global(.snake-layout.game-shell) {
+  padding: 12px;
+}
+
+:global(.snake-layout .game-frame) {
+  width: min(1380px, 100%);
+}
+
+:global(.snake-layout .game-content) {
+  padding: 10px 14px 14px;
+}
+
+:global(.snake-layout .game-meta-row) {
+  display: none;
+}
+
+.snake-play-panel {
+  grid-template-columns: minmax(0, 1fr) minmax(190px, 230px);
+  gap: 12px;
+  align-items: stretch;
+}
+
+.snake-board-shell {
+  height: 100%;
+  min-height: 0;
+  padding: 4px;
+}
+
+.snake-board-shell .canvas-board {
+  max-height: 100%;
+}
+
+.snake-side-panel {
+  gap: 10px;
+  overflow: visible;
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+
+.snake-drawer {
+  overflow: hidden;
+  border: 1px solid rgba(145, 235, 255, 0.2);
+  border-radius: var(--radius);
+  background: rgba(7, 13, 27, 0.76);
+}
+
+.snake-drawer > summary {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 9px;
+  align-items: center;
+  min-height: 46px;
+  padding: 0 12px;
+  color: var(--text);
+  cursor: pointer;
+  font-weight: 900;
+  list-style: none;
+}
+
+.snake-drawer > summary::-webkit-details-marker {
+  display: none;
+}
+
+.snake-drawer > summary svg {
+  color: var(--cyan);
+}
+
+.snake-drawer > summary span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.drawer-chevron {
+  transition: transform 0.18s ease;
+}
+
+.snake-drawer[open] .drawer-chevron {
+  transform: rotate(180deg);
+}
+
+.snake-drawer p {
+  padding: 0 12px 10px;
+  font-size: 0.84rem;
+  line-height: 1.5;
+}
+
+.snake-drawer .d-pad,
+.snake-drawer .snake-skin-grid {
+  margin: 0 12px 12px;
+}
+
 .snake-skin-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: 1fr;
   gap: 8px;
 }
 
@@ -529,8 +725,8 @@ onUnmounted(() => {
 }
 
 .snake-skin-option img {
-  width: 42px;
-  height: 42px;
+  width: 44px;
+  height: 44px;
   border-radius: 8px;
   object-fit: cover;
   box-shadow: 0 0 14px color-mix(in srgb, var(--skin-glow), transparent 58%);
@@ -561,8 +757,107 @@ onUnmounted(() => {
 }
 
 @media (max-width: 860px) {
-  .snake-skin-grid {
+  :global(.snake-layout.game-shell) {
+    padding: 0;
+  }
+
+  :global(.snake-layout .game-frame) {
+    border-radius: 0;
+  }
+
+  :global(.snake-layout .game-content) {
+    padding: 4px;
+  }
+
+  .snake-play-panel {
+    grid-template-columns: 1fr;
+    grid-template-rows: minmax(0, 1fr) auto;
+    align-content: stretch;
+    gap: 6px;
+    height: 100%;
+  }
+
+  .snake-board-shell {
+    aspect-ratio: auto;
+    height: 100%;
+    align-self: stretch;
+    padding: 2px;
+  }
+
+  .snake-side-panel {
+    display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 6px;
+    max-height: none;
+  }
+
+  .snake-drawer {
+    min-width: 0;
+  }
+
+  .snake-drawer > summary {
+    min-height: 38px;
+    padding: 0 9px;
+    gap: 6px;
+    font-size: 0.88rem;
+  }
+
+  .snake-drawer p {
+    padding: 0 9px 8px;
+    font-size: 0.76rem;
+  }
+
+  .snake-drawer .d-pad,
+  .snake-drawer .snake-skin-grid {
+    margin: 0 9px 9px;
+  }
+
+  .snake-skin-grid {
+    grid-template-columns: 1fr;
+    max-height: min(34svh, 220px);
+    overflow: auto;
+    overscroll-behavior: contain;
+  }
+
+  .snake-skin-option {
+    min-height: 52px;
+    grid-template-columns: 38px minmax(0, 1fr);
+    padding: 6px;
+  }
+
+  .snake-skin-option img {
+    width: 38px;
+    height: 38px;
+  }
+}
+
+@media (max-width: 520px) {
+  .snake-side-panel {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .snake-drawer > summary {
+    min-height: 36px;
+  }
+}
+
+@media (max-width: 430px), (max-height: 720px) {
+  .snake-play-panel {
+    grid-template-rows: minmax(0, 1fr) auto;
+  }
+
+  .snake-side-panel {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .snake-drawer p {
+    display: none;
+  }
+
+  .snake-drawer .d-pad {
+    grid-template-columns: repeat(3, 38px);
+    grid-template-rows: repeat(3, 32px);
+    gap: 5px;
   }
 }
 </style>

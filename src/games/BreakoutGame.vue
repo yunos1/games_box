@@ -281,8 +281,10 @@ function resize() {
   const modeChanged = updateBoardSize();
   if (modeChanged && paddle) restart();
   const canvasInset = width === mobileBoard.width ? 8 : 24;
-  const max = Math.max(220, canvas.value.parentElement.clientWidth - canvasInset);
-  const displayWidth = Math.min(max, width);
+  const parent = canvas.value.parentElement;
+  const availableWidth = Math.max(220, parent.clientWidth - canvasInset);
+  const availableHeight = Math.max(220, parent.clientHeight - canvasInset);
+  const displayWidth = Math.min(availableWidth, availableHeight * (width / height), width);
   canvas.value.style.width = `${displayWidth}px`;
   canvas.value.style.height = `${displayWidth * (height / width)}px`;
 }

@@ -234,7 +234,10 @@ function loop() {
 }
 
 function resize() {
-  const displayWidth = Math.min(canvas.value.parentElement.clientWidth - 24, 430);
+  const parent = canvas.value.parentElement;
+  const availableWidth = Math.max(220, parent.clientWidth - 12);
+  const availableHeight = Math.max(220, parent.clientHeight - 12);
+  const displayWidth = Math.min(availableWidth, availableHeight * (width / height), 430);
   canvas.value.style.width = `${displayWidth}px`;
   canvas.value.style.height = `${displayWidth * (height / width)}px`;
 }

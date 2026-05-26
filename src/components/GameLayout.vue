@@ -1,6 +1,6 @@
 <script setup>
 import { computed, onMounted, onUnmounted, ref } from "vue";
-import { RouterLink } from "vue-router";
+import { RouterLink, useRoute } from "vue-router";
 import { ArrowLeft, CheckCircle2, Circle, RotateCcw, Pause, Play, Sparkles, Star, X } from "lucide-vue-next";
 import { getGameById } from "../data/games";
 import { getNextCampaignNode } from "../utils/campaign";
@@ -46,7 +46,16 @@ const props = defineProps({
 });
 
 const emit = defineEmits(["restart", "toggle-pause", "dismiss-result"]);
+const route = useRoute();
+const homeTabIds = new Set(["featured", "all", "action", "puzzle", "strategy", "progress"]);
+const normalizeHomeTab = (value) => {
+  const tab = Array.isArray(value) ? value[0] : value;
+  return typeof tab === "string" && homeTabIds.has(tab) ? tab : "";
+};
 const game = computed(() => getGameById(props.gameId));
+const fromTab = computed(() => normalizeHomeTab(route.query.fromTab));
+const homeTarget = computed(() => (fromTab.value ? { path: "/", query: { tab: fromTab.value } } : "/"));
+const withFromTab = (routePath) => (fromTab.value ? { path: routePath, query: { fromTab: fromTab.value } } : routePath);
 const dailyVariant = computed(() => getDailyVariantForGame(props.gameId));
 const dailyVariantDone = computed(() => {
   props.progressVersion;
@@ -83,6 +92,9 @@ const nextCampaignNode = computed(() => {
   props.progressVersion;
   return getNextCampaignNode(props.gameId);
 });
+const nextCampaignTarget = computed(() =>
+  nextCampaignNode.value ? withFromTab(nextCampaignNode.value.game.route) : "",
+);
 const nextActionLabel = computed(() => (nextCampaignNode.value?.game.id === props.gameId ? "继续补星" : "下一关"));
 
 onMounted(() => {
@@ -101,7 +113,7 @@ onUnmounted(() => {
     <div class="starfield" aria-hidden="true"></div>
     <section class="game-frame">
       <header class="game-topbar">
-        <RouterLink class="icon-button" to="/" aria-label="返回首页">
+        <RouterLink class="icon-button" :to="homeTarget" aria-label="返回首页">
           <ArrowLeft :size="20" />
         </RouterLink>
         <div class="game-title-wrap">
@@ -122,52 +134,54 @@ onUnmounted(() => {
         </div>
       </header>
 
-      <div class="game-info-row">
-        <div v-for="item in stats" :key="item.label" class="stat-chip">
-          <span>{{ item.label }}</span>
-          <strong>{{ item.value }}</strong>
+      <div class="game-hud-row">
+        <div class="game-info-row">
+          <div v-for="item in stats" :key="item.label" class="stat-chip">
+            <span>{{ item.label }}</span>
+            <strong>{{ item.value }}</strong>
+          </div>
+          <div v-if="status" class="status-chip">{{ status }}</div>
         </div>
-        <div v-if="status" class="status-chip">{{ status }}</div>
-      </div>
 
-      <div class="game-meta-row">
-        <details
-          v-if="dailyVariant"
-          class="game-rule-card game-meta-card"
-          :class="{ done: dailyVariantDone }"
-          :open="ruleMetaOpen"
-          @toggle="syncMetaOpen('rule', $event)"
-        >
-          <summary class="mini-panel-title">
-            <Sparkles :size="17" />
-            <strong>今日规则</strong>
-            <span>{{ dailyVariantDone ? "已完成" : dailyVariant.title }}</span>
-          </summary>
-          <p>{{ dailyVariant.detail }}</p>
-        </details>
+        <div class="game-meta-row">
+          <details
+            v-if="dailyVariant"
+            class="game-rule-card game-meta-card"
+            :class="{ done: dailyVariantDone }"
+            :open="ruleMetaOpen"
+            @toggle="syncMetaOpen('rule', $event)"
+          >
+            <summary class="mini-panel-title">
+              <Sparkles :size="17" />
+              <strong>今日规则</strong>
+              <span>{{ dailyVariantDone ? "已完成" : dailyVariant.title }}</span>
+            </summary>
+            <p>{{ dailyVariant.detail }}</p>
+          </details>
 
-        <details class="game-star-card game-meta-card" :open="starMetaOpen" @toggle="syncMetaOpen('star', $event)">
-          <summary class="mini-panel-title">
-            <Star :size="17" />
-            <strong>星级目标</strong>
-            <span>{{ starSummary.stars }}/{{ starSummary.total }}</span>
-          </summary>
-          <div class="star-goal-list">
-            <div
-              v-for="goal in starSummary.goals"
-              :key="goal.id"
-              class="star-goal-item"
-              :class="{ unlocked: goal.unlocked }"
-            >
-              <CheckCircle2 v-if="goal.unlocked" :size="16" />
-              <Circle v-else :size="16" />
-              <div>
-                <strong>{{ goal.title }}</strong>
-                <span>{{ goal.description }}</span>
+          <details class="game-star-card game-meta-card" :open="starMetaOpen" @toggle="syncMetaOpen('star', $event)">
+            <summary class="mini-panel-title">
+              <Star :size="17" />
+              <strong>星级目标</strong>
+              <span>{{ starSummary.stars }}/{{ starSummary.total }}</span>
+            </summary>
+            <div class="star-goal-list">
+              <div
+                v-for="goal in starSummary.goals"
+                :key="goal.id"
+                class="star-goal-item"
+                :class="{ unlocked: goal.unlocked }"
+              >
+                <CheckCircle2 v-if="goal.unlocked" :size="16" />
+                <Circle v-else :size="16" />
+                <div>
+                  <strong>{{ goal.title }}</strong>
+                  <span>{{ goal.description }}</span>
+                </div>
               </div>
             </div>
-          </div>
-        </details>
+          </details>
+        </div>
       </div>
 
       <div class="game-content">
@@ -212,7 +226,7 @@ onUnmounted(() => {
           <RouterLink
             v-if="nextCampaignNode"
             class="result-next-card"
-            :to="nextCampaignNode.game.route"
+            :to="nextCampaignTarget"
             :style="{ '--accent': nextCampaignNode.game.accent }"
           >
             <img :src="nextCampaignNode.game.icon" alt="" />

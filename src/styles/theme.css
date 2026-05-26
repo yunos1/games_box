@@ -79,7 +79,7 @@ a {
   width: min(1180px, calc(100vw - 32px));
   min-height: 100vh;
   margin: 0 auto;
-  padding: 44px 0 48px;
+  padding: 28px 0 42px;
 }
 
 .hero-panel {
@@ -88,8 +88,8 @@ a {
   grid-template-columns: minmax(0, 1fr);
   gap: 14px;
   align-items: end;
-  min-height: 198px;
-  padding: 24px 0 20px;
+  min-height: 132px;
+  padding: 16px 0 18px;
   border-bottom: 1px solid var(--line);
 }
 
@@ -126,10 +126,10 @@ a {
 
 .hero-subtitle {
   max-width: 560px;
-  margin: 16px 0 0;
+  margin: 10px 0 0;
   color: var(--muted);
-  font-size: clamp(1rem, 2.4vw, 1.2rem);
-  line-height: 1.7;
+  font-size: clamp(0.94rem, 2vw, 1.05rem);
+  line-height: 1.55;
 }
 
 .command-strip {
@@ -165,7 +165,7 @@ a {
   display: grid;
   grid-template-columns: repeat(6, minmax(0, 1fr));
   gap: 10px;
-  padding: 20px 0 0;
+  padding: 16px 0 0;
 }
 
 .home-tab-button {
@@ -269,6 +269,119 @@ a {
   padding: 28px 0 0;
 }
 
+.home-focus-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  padding: 16px 0 0;
+}
+
+.home-status-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  padding: 12px;
+}
+
+.home-focus-stack {
+  display: grid;
+  gap: 12px;
+}
+
+.compact-smart-card {
+  min-height: 0;
+  padding: 14px;
+}
+
+.compact-smart-card p {
+  display: none;
+}
+
+.compact-smart-card h2 {
+  font-size: clamp(1.2rem, 2.2vw, 1.55rem);
+}
+
+.home-more-panel {
+  margin-top: 12px;
+  border: 1px solid rgba(145, 235, 255, 0.16);
+  border-radius: var(--radius);
+  background: rgba(5, 10, 22, 0.42);
+}
+
+.home-more-panel > summary {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  min-height: 48px;
+  padding: 10px 14px;
+  cursor: pointer;
+  list-style: none;
+}
+
+.home-more-panel > summary::-webkit-details-marker {
+  display: none;
+}
+
+.home-more-panel > summary span {
+  color: var(--cyan);
+  font-weight: 900;
+}
+
+.home-more-panel > summary strong {
+  justify-self: start;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 0.82rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.home-more-panel > summary::after {
+  content: "展开";
+  display: inline-flex;
+  min-height: 28px;
+  align-items: center;
+  justify-content: center;
+  padding: 5px 9px;
+  border: 1px solid rgba(145, 235, 255, 0.2);
+  border-radius: 999px;
+  background: rgba(83, 243, 255, 0.06);
+  color: var(--cyan);
+  font-size: 0.72rem;
+  font-weight: 900;
+  white-space: nowrap;
+}
+
+.home-more-panel[open] > summary {
+  border-bottom: 1px solid rgba(145, 235, 255, 0.12);
+}
+
+.home-more-panel[open] > summary::after {
+  content: "收起";
+}
+
+.home-more-panel > .home-dashboard,
+.home-more-panel > .home-status-grid,
+.home-more-panel > .recent-strip,
+.home-more-panel > .quest-strip,
+.home-more-panel > .route-dashboard,
+.home-more-panel > .rule-dashboard {
+  padding: 12px;
+}
+
+.home-more-panel > .home-status-grid,
+.home-more-panel > .recent-strip,
+.home-more-panel > .quest-strip,
+.home-more-panel > .route-dashboard,
+.home-more-panel > .rule-dashboard {
+  padding-top: 0;
+}
+
+.compact-home-dashboard {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
 .compact-dashboard {
   grid-template-columns: minmax(0, 1fr) minmax(280px, 0.9fr);
 }
@@ -289,8 +402,12 @@ a {
 
 .daily-panel {
   position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px 18px;
+  align-items: end;
   overflow: hidden;
-  padding: 18px;
+  padding: 16px 18px;
 }
 
 .daily-panel::after {
@@ -316,7 +433,8 @@ a {
 .daily-core {
   position: relative;
   z-index: 1;
-  margin-top: 18px;
+  grid-column: 1;
+  margin-top: 10px;
 }
 
 .daily-core p,
@@ -326,8 +444,8 @@ a {
 }
 
 .daily-core h2 {
-  margin: 7px 0 9px;
-  font-size: clamp(1.55rem, 4vw, 2.5rem);
+  margin: 5px 0 7px;
+  font-size: clamp(1.45rem, 3vw, 2.15rem);
   letter-spacing: 0;
 }
 
@@ -340,10 +458,13 @@ a {
   position: relative;
   z-index: 1;
   display: flex;
+  grid-column: 2;
+  grid-row: 1 / span 2;
+  flex-direction: column;
   align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  margin-top: 18px;
+  justify-content: center;
+  gap: 10px;
+  margin-top: 0;
 }
 
 .panel-link {
@@ -1444,6 +1565,55 @@ a {
 
 .compact-game-grid {
   grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+  padding-top: 12px;
+}
+
+.compact-game-grid .game-card.compact {
+  min-height: 104px;
+  padding: 12px;
+  background:
+    linear-gradient(145deg, rgba(9, 18, 38, 0.78), rgba(6, 11, 24, 0.66)),
+    radial-gradient(circle at 12% 0%, color-mix(in srgb, var(--accent), transparent 84%), transparent 42%);
+  box-shadow: inset 0 0 22px rgba(83, 243, 255, 0.03);
+}
+
+.compact-game-grid .game-card.compact:hover {
+  transform: translateY(-2px);
+  box-shadow:
+    inset 0 0 24px rgba(83, 243, 255, 0.04),
+    0 12px 28px rgba(0, 0, 0, 0.2);
+}
+
+.compact-game-grid .game-card.compact .card-icon {
+  width: 42px;
+  height: 42px;
+}
+
+.compact-game-grid .game-card.compact .card-body p,
+.compact-game-grid .game-card.compact .card-body span,
+.compact-game-grid .game-card.compact .card-foot {
+  display: none;
+}
+
+.compact-game-grid .game-card.compact .card-body h2 {
+  margin: 0;
+  font-size: 1.05rem;
+}
+
+.compact-game-grid .game-card.compact .card-badges {
+  max-width: 120px;
+}
+
+.compact-game-grid .game-card.compact .card-tag,
+.compact-game-grid .game-card.compact .card-status {
+  min-height: 23px;
+  padding: 4px 7px;
+  font-size: 0.68rem;
+}
+
+.compact-game-grid .game-card.compact .card-progress-row {
+  align-self: center;
 }
 
 .progress-summary-grid {
@@ -1598,6 +1768,7 @@ a {
   flex-wrap: wrap;
   gap: 7px;
   margin-top: 16px;
+  margin-bottom: 42px;
 }
 
 .card-stars,
@@ -1687,6 +1858,7 @@ a {
   align-self: end;
   justify-content: flex-end;
   margin-top: 0;
+  margin-bottom: 0;
 }
 
 .game-card.compact .card-foot {
@@ -1711,6 +1883,10 @@ a {
 @media (max-width: 1050px) {
   .home-tabs {
     grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .compact-home-dashboard {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .home-dashboard {
@@ -1778,14 +1954,14 @@ a {
 @media (max-width: 740px) {
   .home-page {
     width: min(100% - 24px, 560px);
-    padding: 18px 0 34px;
+    padding: 14px 0 30px;
   }
 
   .hero-panel {
     grid-template-columns: 1fr;
     min-height: auto;
-    gap: 12px;
-    padding: 12px 0 18px;
+    gap: 8px;
+    padding: 8px 0 12px;
   }
 
   .eyebrow {
@@ -1794,21 +1970,16 @@ a {
 
   .hero-copy h1 {
     max-width: 340px;
-    font-size: clamp(2.45rem, 11vw, 4rem);
+    font-size: clamp(2.25rem, 10vw, 3.45rem);
     line-height: 0.95;
   }
 
   .hero-subtitle {
-    margin-top: 14px;
-    font-size: 0.95rem;
-    line-height: 1.65;
+    display: none;
   }
 
   .command-strip {
-    display: flex;
-    gap: 8px 14px;
-    min-width: 0;
-    font-size: 0.67rem;
+    display: none;
   }
 
   .command-strip span {
@@ -1822,7 +1993,7 @@ a {
     gap: 7px;
     margin: 0;
     overflow: visible;
-    padding: 16px 0 0;
+    padding: 12px 0 0;
   }
 
   .home-tab-button {
@@ -1867,7 +2038,110 @@ a {
 
   .tab-section-heading {
     align-items: start;
-    padding-top: 22px;
+    padding-top: 16px;
+  }
+
+  .home-focus-grid {
+    grid-template-columns: 1fr;
+    gap: 10px;
+    padding-top: 12px;
+  }
+
+  .daily-panel {
+    grid-template-columns: 1fr;
+    gap: 8px;
+    padding: 13px;
+  }
+
+  .daily-core {
+    margin-top: 6px;
+  }
+
+  .daily-core h2 {
+    font-size: 1.34rem;
+  }
+
+  .daily-core span {
+    display: none;
+  }
+
+  .daily-actions {
+    grid-column: 1;
+    grid-row: auto;
+    flex-direction: row;
+    justify-content: space-between;
+  }
+
+  .home-status-grid {
+    grid-template-columns: 1fr;
+    gap: 10px;
+  }
+
+  .home-focus-stack {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+  }
+
+  .compact-smart-card {
+    padding: 12px;
+  }
+
+  .compact-smart-card h2 {
+    font-size: 1.12rem;
+  }
+
+  .home-more-panel {
+    margin-top: 12px;
+  }
+
+  .home-more-panel > summary {
+    min-height: 44px;
+    padding: 9px 11px;
+  }
+
+  .home-more-panel > summary strong {
+    max-width: 180px;
+  }
+
+  .compact-game-grid {
+    grid-template-columns: 1fr;
+    gap: 8px;
+    padding-top: 10px;
+  }
+
+  .compact-game-grid .game-card.compact {
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    min-height: 72px;
+    padding: 10px;
+  }
+
+  .compact-game-grid .game-card.compact .card-icon {
+    grid-column: 1;
+    grid-row: 1 / span 2;
+    width: 38px;
+    height: 38px;
+  }
+
+  .compact-game-grid .game-card.compact .card-badges {
+    grid-column: 2;
+    grid-row: 1;
+    justify-content: flex-start;
+  }
+
+  .compact-game-grid .game-card.compact .card-body {
+    grid-column: 2;
+    grid-row: 2;
+  }
+
+  .compact-game-grid .game-card.compact .card-progress-row {
+    grid-column: 3;
+    grid-row: 1 / span 2;
+    justify-content: flex-end;
+    margin-top: 0;
+  }
+
+  .compact-home-dashboard {
+    grid-template-columns: 1fr;
   }
 
   .home-dashboard {
@@ -2012,6 +2286,7 @@ a {
   .game-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 12px;
+    padding-top: 18px;
   }
 
   .game-card {

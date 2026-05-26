@@ -190,8 +190,16 @@ restart();
 }
 
 @media (max-width: 640px) {
+  .guess-console {
+    height: 100%;
+    min-height: 0;
+    gap: 12px;
+    padding: 14px;
+  }
+
   .guess-form {
     grid-template-columns: 1fr;
+    gap: 8px;
   }
 
   .target-ring {
@@ -199,7 +207,12 @@ restart();
   }
 
   .target-ring strong {
-    font-size: 4.5rem;
+    width: min(42vw, 34svh, 170px);
+    font-size: 4rem;
+  }
+
+  .history-list {
+    max-height: 120px;
   }
 }
 </style>

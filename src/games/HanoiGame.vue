@@ -108,4 +108,22 @@ restart();
   border-radius: 999px;
   background: linear-gradient(90deg, #53f3ff, #ff4fd8);
 }
+
+@media (max-width: 860px) {
+  .hanoi-board {
+    width: min(100%, 620px);
+    height: 100%;
+    gap: 8px;
+  }
+
+  .hanoi-tower {
+    min-height: 0;
+    gap: 6px;
+    padding: 8px;
+  }
+
+  .disk {
+    height: 18px;
+  }
+}
 </style>

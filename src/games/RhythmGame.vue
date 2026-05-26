@@ -148,4 +148,13 @@ onUnmounted(() => {
   bottom: 6px;
   font-size: 0.75rem;
 }
+
+@media (max-width: 860px) {
+  .rhythm-board {
+    width: min(100%, 430px);
+    height: 100%;
+    gap: 5px;
+    padding: 8px;
+  }
+}
 </style>
