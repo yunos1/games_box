@@ -4,25 +4,33 @@ import {
   Brain,
   ChartNoAxesColumn,
   CheckCircle2,
+  Clock3,
   Circle,
+  Compass,
   Flag,
   Gamepad2,
   Gift,
+  Grid2X2,
   LayoutGrid,
+  List,
   Medal,
+  Search,
   Sparkles,
   Star,
   Swords,
   Target,
   Trophy,
+  Zap,
 } from "lucide-vue-next";
 import GameCard from "../components/GameCard.vue";
 import { games } from "../data/games";
+import { getProgress } from "../utils/storage";
 import {
   getDailyChallenge,
   getDailyChallengeStatus,
   getDailyVariantHighlights,
   getDailyVariantStatus,
+  getGameStarSummary,
   getLeaderboardHighlights,
   getTotalStarCount,
   getUnlockedAchievements,
@@ -40,9 +48,38 @@ const rewards = getUnlockedRewards(starTotal);
 const unlockedCount = computed(() => achievements.filter((item) => item.unlocked).length);
 const rewardCount = computed(() => rewards.filter((item) => item.unlocked).length);
 const activeTab = ref("featured");
+const searchQuery = ref("");
+const libraryView = ref("grid");
+const progress = getProgress();
+const gameProgress = progress.games || {};
 const actionTags = new Set(["动作", "反应", "街机"]);
 const puzzleTags = new Set(["益智", "逻辑", "解谜", "推理"]);
 const strategyCasualTags = new Set(["策略", "冒险", "消除", "休闲"]);
+const routeSeeds = {
+  quick: ["guess-number", "link-link", "lights-out"],
+  brain: ["sudoku", "laser-puzzle", "sokoban"],
+  arcade: ["snake", "breakout", "plane-war"],
+};
+
+function findGames(ids) {
+  return ids.map((id) => games.find((game) => game.id === id)).filter(Boolean);
+}
+
+function activityTime(game) {
+  const entry = gameProgress[game.id] || {};
+  return entry.lastResultAt || entry.lastPlayedAt || "";
+}
+
+function filterGames(list) {
+  const query = searchQuery.value.trim().toLowerCase();
+  if (!query) return list;
+  return list.filter((game) =>
+    [game.title, game.subtitle, game.description, game.tag, game.difficulty].some((value) =>
+      String(value).toLowerCase().includes(query),
+    ),
+  );
+}
+
 const recommendedGames = computed(() => {
   const ids = [challenge.gameId, ...dailyRules.map(({ game }) => game.id)];
   const uniqueIds = [...new Set(ids)];
@@ -51,13 +88,86 @@ const recommendedGames = computed(() => {
 const actionGames = computed(() => games.filter((game) => actionTags.has(game.tag)));
 const puzzleGames = computed(() => games.filter((game) => puzzleTags.has(game.tag)));
 const strategyCasualGames = computed(() => games.filter((game) => strategyCasualTags.has(game.tag)));
+const librarySections = computed(() => [
+  { id: "all", eyebrow: "GAME LIBRARY", title: "全部游戏", games },
+  { id: "action", eyebrow: "ARCADE", title: "动作街机", games: actionGames.value },
+  { id: "puzzle", eyebrow: "PUZZLE", title: "益智解谜", games: puzzleGames.value },
+  { id: "strategy", eyebrow: "TACTICAL & CHILL", title: "策略休闲", games: strategyCasualGames.value },
+]);
+const activeLibrary = computed(() => librarySections.value.find((section) => section.id === activeTab.value) || null);
+const filteredLibraryGames = computed(() => filterGames(activeLibrary.value?.games || []));
+const recentlyPlayedGames = computed(() =>
+  games
+    .filter((game) => activityTime(game))
+    .sort((a, b) => new Date(activityTime(b)) - new Date(activityTime(a)))
+    .slice(0, 4),
+);
+const lastPlayedGame = computed(() => games.find((game) => game.id === progress.lastPlayed) || recentlyPlayedGames.value[0] || null);
+const starFocus = computed(() => {
+  const candidates = games
+    .map((game) => {
+      const summary = getGameStarSummary(game.id);
+      return {
+        game,
+        ...summary,
+        remaining: summary.total - summary.stars,
+      };
+    })
+    .filter((item) => item.remaining > 0)
+    .sort((a, b) => a.remaining - b.remaining || b.stars - a.stars || a.game.title.localeCompare(b.game.title, "zh-Hans-CN"));
+  return candidates[0] || null;
+});
+const dailyProgress = computed(() => {
+  const done = dailyRules.filter(({ game }) => getDailyVariantStatus(game.id)).length + (challengeDone ? 1 : 0);
+  const total = dailyRules.length + 1;
+  return {
+    done,
+    total,
+    percent: total ? Math.round((done / total) * 100) : 0,
+  };
+});
+const playRoutes = computed(() => [
+  {
+    id: "quick",
+    title: "轻松开局",
+    detail: "短局、低压力，适合先热身。",
+    icon: Zap,
+    accent: "#53f3ff",
+    games: findGames(routeSeeds.quick),
+  },
+  {
+    id: "brain",
+    title: "烧脑推进",
+    detail: "逻辑、关卡和推演放在一条线里。",
+    icon: Brain,
+    accent: "#facc15",
+    games: findGames(routeSeeds.brain),
+  },
+  {
+    id: "arcade",
+    title: "动作爽局",
+    detail: "反应、节奏和即时反馈更集中。",
+    icon: Gamepad2,
+    accent: "#ff4fd8",
+    games: findGames(routeSeeds.arcade),
+  },
+]);
+
+function gameCardStatus(game) {
+  const summary = getGameStarSummary(game.id);
+  if (lastPlayedGame.value?.id === game.id) return { label: "继续", tone: "hot" };
+  if (summary.stars >= summary.total) return { label: "满星", tone: "done" };
+  if (summary.total - summary.stars === 1) return { label: "差一星", tone: "focus" };
+  return null;
+}
+
 const tabs = computed(() => [
-  { id: "featured", label: "推荐", icon: Sparkles, count: recommendedGames.value.length },
-  { id: "all", label: "全部", icon: LayoutGrid, count: games.length },
-  { id: "action", label: "动作街机", icon: Gamepad2, count: actionGames.value.length },
-  { id: "puzzle", label: "益智解谜", icon: Brain, count: puzzleGames.value.length },
-  { id: "strategy", label: "策略休闲", icon: Swords, count: strategyCasualGames.value.length },
-  { id: "progress", label: "进度", icon: ChartNoAxesColumn, count: `${starTotal}/${starMax}` },
+  { id: "featured", label: "推荐", shortLabel: "推荐", icon: Sparkles, count: recommendedGames.value.length },
+  { id: "all", label: "全部", shortLabel: "全部", icon: LayoutGrid, count: games.length },
+  { id: "action", label: "动作街机", shortLabel: "街机", icon: Gamepad2, count: actionGames.value.length },
+  { id: "puzzle", label: "益智解谜", shortLabel: "解谜", icon: Brain, count: puzzleGames.value.length },
+  { id: "strategy", label: "策略休闲", shortLabel: "策略", icon: Swords, count: strategyCasualGames.value.length },
+  { id: "progress", label: "进度", shortLabel: "进度", icon: ChartNoAxesColumn, count: `${starTotal}/${starMax}` },
 ]);
 </script>
 
@@ -88,7 +198,8 @@ const tabs = computed(() => [
         @click="activeTab = tab.id"
       >
         <component :is="tab.icon" :size="18" />
-        <span>{{ tab.label }}</span>
+        <span class="home-tab-label home-tab-label-full">{{ tab.label }}</span>
+        <span class="home-tab-label home-tab-label-short">{{ tab.shortLabel }}</span>
         <strong>{{ tab.count }}</strong>
       </button>
     </nav>
@@ -128,6 +239,87 @@ const tabs = computed(() => [
         </RouterLink>
       </section>
 
+      <section class="smart-dashboard" aria-label="智能入口">
+        <RouterLink
+          v-if="lastPlayedGame"
+          class="dashboard-panel smart-card"
+          :to="lastPlayedGame.route"
+          :style="{ '--accent': lastPlayedGame.accent }"
+        >
+          <div class="panel-title">
+            <Clock3 :size="19" />
+            <span>继续上次</span>
+          </div>
+          <h2>{{ lastPlayedGame.title }}</h2>
+          <p>{{ lastPlayedGame.description }}</p>
+          <strong>继续挑战</strong>
+        </RouterLink>
+        <article v-else class="dashboard-panel smart-card" :style="{ '--accent': challenge.accent }">
+          <div class="panel-title">
+            <Clock3 :size="19" />
+            <span>继续上次</span>
+          </div>
+          <h2>还没有记录</h2>
+          <p>先完成任意一局，这里会自动出现最近游玩的入口。</p>
+          <strong>等待首局</strong>
+        </article>
+
+        <RouterLink
+          v-if="starFocus"
+          class="dashboard-panel smart-card"
+          :to="starFocus.game.route"
+          :style="{ '--accent': starFocus.game.accent }"
+        >
+          <div class="panel-title">
+            <Compass :size="19" />
+            <span>星级冲刺</span>
+          </div>
+          <h2>{{ starFocus.game.title }}</h2>
+          <p>已点亮 {{ starFocus.stars }}/{{ starFocus.total }} 星，再拿 {{ starFocus.remaining }} 星就能补完。</p>
+          <strong>冲刺星级</strong>
+        </RouterLink>
+
+        <article class="dashboard-panel smart-card daily-progress-card" :style="{ '--accent': '#7dff6f' }">
+          <div class="panel-title">
+            <Target :size="19" />
+            <span>今日进度</span>
+          </div>
+          <h2>{{ dailyProgress.done }}/{{ dailyProgress.total }}</h2>
+          <p>今日挑战和规则变体会一起计入当天进度。</p>
+          <div class="smart-meter" aria-hidden="true">
+            <span :style="{ width: `${dailyProgress.percent}%` }"></span>
+          </div>
+        </article>
+      </section>
+
+      <section v-if="recentlyPlayedGames.length" class="recent-strip" aria-label="最近玩过">
+        <span><Clock3 :size="16" />最近玩过</span>
+        <RouterLink v-for="game in recentlyPlayedGames" :key="game.id" :to="game.route" :style="{ '--accent': game.accent }">
+          {{ game.title }}
+        </RouterLink>
+      </section>
+
+      <section class="route-dashboard" aria-label="玩法路线">
+        <article
+          v-for="route in playRoutes"
+          :key="route.id"
+          class="dashboard-panel route-card"
+          :style="{ '--accent': route.accent }"
+        >
+          <div class="panel-title">
+            <component :is="route.icon" :size="19" />
+            <span>{{ route.title }}</span>
+          </div>
+          <p>{{ route.detail }}</p>
+          <div class="route-game-list">
+            <RouterLink v-for="game in route.games" :key="game.id" :to="game.route" :style="{ '--accent': game.accent }">
+              <img :src="game.icon" alt="" />
+              <span>{{ game.title }}</span>
+            </RouterLink>
+          </div>
+        </article>
+      </section>
+
       <section class="rule-dashboard" aria-label="今日规则变体">
         <RouterLink
           v-for="{ game, variant } in dailyRules"
@@ -154,60 +346,66 @@ const tabs = computed(() => [
         <span>{{ recommendedGames.length }} 款</span>
       </section>
       <section class="game-grid compact-game-grid" aria-label="今日推荐游戏">
-        <GameCard v-for="(game, index) in recommendedGames" :key="game.id" :game="game" :index="index" />
+        <GameCard
+          v-for="(game, index) in recommendedGames"
+          :key="game.id"
+          :game="game"
+          :index="index"
+          :status="gameCardStatus(game)"
+        />
       </section>
     </section>
 
-    <section v-else-if="activeTab === 'all'" class="tab-panel" aria-label="全部游戏">
-      <section class="tab-section-heading">
+    <section v-else-if="activeLibrary" class="tab-panel" :aria-label="activeLibrary.title">
+      <section class="tab-section-heading library-heading">
         <div>
-          <p class="eyebrow">GAME LIBRARY</p>
-          <h2>全部游戏</h2>
+          <p class="eyebrow">{{ activeLibrary.eyebrow }}</p>
+          <h2>{{ activeLibrary.title }}</h2>
         </div>
-        <span>{{ games.length }} 款</span>
+        <span>{{ filteredLibraryGames.length }}/{{ activeLibrary.games.length }}</span>
       </section>
-      <section class="game-grid" aria-label="全部游戏菜单">
-        <GameCard v-for="(game, index) in games" :key="game.id" :game="game" :index="index" />
-      </section>
-    </section>
 
-    <section v-else-if="activeTab === 'action'" class="tab-panel" aria-label="动作街机">
-      <section class="tab-section-heading">
-        <div>
-          <p class="eyebrow">ARCADE</p>
-          <h2>动作街机</h2>
+      <section class="library-toolbar" aria-label="游戏库工具">
+        <label class="library-search">
+          <Search :size="18" />
+          <input v-model="searchQuery" type="search" placeholder="搜索游戏、类型或玩法" />
+        </label>
+        <div class="view-toggle" aria-label="视图切换">
+          <button
+            type="button"
+            :class="{ active: libraryView === 'grid' }"
+            aria-label="卡片视图"
+            @click="libraryView = 'grid'"
+          >
+            <Grid2X2 :size="17" />
+          </button>
+          <button
+            type="button"
+            :class="{ active: libraryView === 'list' }"
+            aria-label="列表视图"
+            @click="libraryView = 'list'"
+          >
+            <List :size="17" />
+          </button>
         </div>
-        <span>{{ actionGames.length }} 款</span>
       </section>
-      <section class="game-grid" aria-label="动作街机游戏">
-        <GameCard v-for="(game, index) in actionGames" :key="game.id" :game="game" :index="index" />
-      </section>
-    </section>
 
-    <section v-else-if="activeTab === 'puzzle'" class="tab-panel" aria-label="益智解谜">
-      <section class="tab-section-heading">
-        <div>
-          <p class="eyebrow">PUZZLE</p>
-          <h2>益智解谜</h2>
-        </div>
-        <span>{{ puzzleGames.length }} 款</span>
+      <section
+        v-if="filteredLibraryGames.length"
+        class="game-grid"
+        :class="{ 'list-game-grid': libraryView === 'list' }"
+        :aria-label="`${activeLibrary.title}游戏`"
+      >
+        <GameCard
+          v-for="(game, index) in filteredLibraryGames"
+          :key="game.id"
+          :game="game"
+          :index="index"
+          :compact="libraryView === 'list'"
+          :status="gameCardStatus(game)"
+        />
       </section>
-      <section class="game-grid" aria-label="益智解谜游戏">
-        <GameCard v-for="(game, index) in puzzleGames" :key="game.id" :game="game" :index="index" />
-      </section>
-    </section>
-
-    <section v-else-if="activeTab === 'strategy'" class="tab-panel" aria-label="策略休闲">
-      <section class="tab-section-heading">
-        <div>
-          <p class="eyebrow">TACTICAL & CHILL</p>
-          <h2>策略休闲</h2>
-        </div>
-        <span>{{ strategyCasualGames.length }} 款</span>
-      </section>
-      <section class="game-grid" aria-label="策略休闲游戏">
-        <GameCard v-for="(game, index) in strategyCasualGames" :key="game.id" :game="game" :index="index" />
-      </section>
+      <div v-else class="empty-state library-empty">没有匹配的游戏</div>
     </section>
 
     <section v-else class="tab-panel progress-panel" aria-label="进度">

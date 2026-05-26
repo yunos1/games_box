@@ -13,6 +13,14 @@ const props = defineProps({
     type: Number,
     default: 0,
   },
+  compact: {
+    type: Boolean,
+    default: false,
+  },
+  status: {
+    type: Object,
+    default: null,
+  },
 });
 
 const starSummary = computed(() => getGameStarSummary(props.game.id));
@@ -22,13 +30,17 @@ const dailyVariant = computed(() => getDailyVariantForGame(props.game.id));
 <template>
   <RouterLink
     class="game-card"
+    :class="{ compact }"
     :to="game.route"
     :style="{ '--accent': game.accent, '--delay': `${index * 55}ms` }"
   >
     <div class="card-orbit" aria-hidden="true"></div>
     <div class="card-head">
       <img class="card-icon" :src="game.icon" alt="" />
-      <span class="card-tag">{{ game.tag }}</span>
+      <div class="card-badges">
+        <span v-if="status" class="card-status" :class="status.tone">{{ status.label }}</span>
+        <span class="card-tag">{{ game.tag }}</span>
+      </div>
     </div>
     <div class="card-body">
       <p>{{ game.subtitle }}</p>
