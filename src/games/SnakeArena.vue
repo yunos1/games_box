@@ -1,6 +1,6 @@
 <script setup>
 import { computed, onMounted, onUnmounted, ref } from "vue";
-import { ChevronDown, Gamepad2, Settings } from "lucide-vue-next";
+import { ChevronDown, Settings } from "lucide-vue-next";
 import GameLayout from "../components/GameLayout.vue";
 import { createSwipeHandlers } from "../utils/touch";
 import { SNAKE_FOODS } from "../data/snakeFoods";
@@ -15,8 +15,8 @@ const paused = ref(false);
 const selectedSkinId = ref(getSavedValue("snake:skin", "cyber"));
 const selectedSkin = computed(() => getSnakeSkinById(selectedSkinId.value));
 
-const grid = 28;
-const size = 560;
+const grid = 24;
+const size = 840;
 const dirs = {
   up: { x: 0, y: -1 },
   down: { x: 0, y: 1 },
@@ -90,16 +90,16 @@ function spawnFood() {
 function restart() {
   player = {
     body: [
-      { x: 14, y: 18 },
-      { x: 13, y: 18 },
-      { x: 12, y: 18 },
-      { x: 11, y: 18 },
+      { x: 12, y: 16 },
+      { x: 11, y: 16 },
+      { x: 10, y: 16 },
+      { x: 9, y: 16 },
     ],
   };
   aiSnakes = [
     { body: [{ x: 5, y: 5 }, { x: 4, y: 5 }, { x: 3, y: 5 }], dir: "right", skinId: "candy", respawn: 0 },
-    { body: [{ x: 22, y: 8 }, { x: 23, y: 8 }, { x: 24, y: 8 }], dir: "left", skinId: "tiger", respawn: 0 },
-    { body: [{ x: 8, y: 23 }, { x: 8, y: 24 }, { x: 8, y: 25 }], dir: "up", skinId: "jungle", respawn: 0 },
+    { body: [{ x: 19, y: 7 }, { x: 20, y: 7 }, { x: 21, y: 7 }], dir: "left", skinId: "tiger", respawn: 0 },
+    { body: [{ x: 8, y: 20 }, { x: 8, y: 21 }, { x: 8, y: 22 }], dir: "up", skinId: "jungle", respawn: 0 },
   ];
   foods = [];
   lastFoodId = "";
@@ -135,8 +135,8 @@ function killAi(snake) {
 function respawnAi(snake, index) {
   const starts = [
     [{ x: 5, y: 5 }, { x: 4, y: 5 }, { x: 3, y: 5 }],
-    [{ x: 22, y: 8 }, { x: 23, y: 8 }, { x: 24, y: 8 }],
-    [{ x: 8, y: 23 }, { x: 8, y: 24 }, { x: 8, y: 25 }],
+    [{ x: 19, y: 7 }, { x: 20, y: 7 }, { x: 21, y: 7 }],
+    [{ x: 8, y: 20 }, { x: 8, y: 21 }, { x: 8, y: 22 }],
   ];
   snake.body = starts[index].map((part) => ({ ...part }));
   snake.dir = index === 1 ? "left" : index === 2 ? "up" : "right";
@@ -341,7 +341,7 @@ function drawSkinPattern(skin, x, y, partSize, index) {
 }
 
 function drawSnakePart(part, index, cell, skin, dir) {
-  const gap = Math.max(1.2, cell * 0.045);
+  const gap = Math.max(0.5, cell * 0.016);
   const x = part.x * cell + gap;
   const y = part.y * cell + gap;
   const partSize = cell - gap * 2;
@@ -349,7 +349,7 @@ function drawSnakePart(part, index, cell, skin, dir) {
   const isHead = index === 0;
 
   ctx.save();
-  ctx.shadowBlur = isHead ? 16 : 9;
+  ctx.shadowBlur = isHead ? 18 : 11;
   ctx.shadowColor = isHead ? skin.head : skin.glow;
   const fill = ctx.createLinearGradient(x, y, x + partSize, y + partSize);
   fill.addColorStop(0, isHead ? skin.head : skin.body);
@@ -423,7 +423,7 @@ function drawFood(food, cell) {
   const centerX = food.x * cell + cell / 2;
   const centerY = food.y * cell + cell / 2;
   const isGold = food.value > 10;
-  const imageSize = cell * (isGold ? 1.18 : 1.06);
+  const imageSize = cell * (isGold ? 1.52 : 1.36);
 
   ctx.save();
   ctx.shadowBlur = isGold ? 20 : 14;
@@ -433,7 +433,7 @@ function drawFood(food, cell) {
   } else {
     ctx.fillStyle = isGold ? "#facc15" : "#ffd166";
     ctx.beginPath();
-    ctx.arc(centerX, centerY, cell * (isGold ? 0.48 : 0.38), 0, Math.PI * 2);
+    ctx.arc(centerX, centerY, cell * (isGold ? 0.62 : 0.52), 0, Math.PI * 2);
     ctx.fill();
   }
 
@@ -442,7 +442,7 @@ function drawFood(food, cell) {
     ctx.strokeStyle = "rgba(255, 255, 255, 0.66)";
     ctx.lineWidth = Math.max(1.2, cell * 0.045);
     ctx.beginPath();
-    ctx.arc(centerX, centerY, cell * 0.48, 0, Math.PI * 2);
+    ctx.arc(centerX, centerY, cell * 0.6, 0, Math.PI * 2);
     ctx.stroke();
   }
   ctx.restore();
@@ -491,7 +491,7 @@ function loop(time) {
 
 function resize() {
   const parent = canvas.value.parentElement;
-  const displaySize = Math.min(parent.clientWidth - 12, parent.clientHeight - 12, 620);
+  const displaySize = Math.max(280, Math.min(parent.clientWidth - 8, parent.clientHeight - 8));
   canvas.value.style.width = `${displaySize}px`;
   canvas.value.style.height = `${displaySize}px`;
 }
@@ -543,6 +543,7 @@ onUnmounted(() => {
 
 <template>
   <GameLayout
+    class="snake-arena-layout"
     game-id="snake-arena"
     :score="score"
     :best="best"
@@ -552,35 +553,21 @@ onUnmounted(() => {
     @restart="restart"
     @toggle-pause="togglePause"
   >
-    <section class="game-panel split-panel">
+    <section class="game-panel arena-play-panel">
       <div
-        class="board-shell"
+        class="board-shell arena-board-shell"
         @click="gameOver && restart()"
         @touchstart.passive="swipe.onTouchStart"
         @touchend.passive="swipe.onTouchEnd"
         @touchmove.prevent
       >
-        <canvas ref="canvas" class="canvas-board arena-canvas" aria-label="贪吃蛇大作战游戏画布"></canvas>
-      </div>
-      <aside class="control-panel arena-side-panel">
-        <details class="arena-drawer">
-          <summary>
-            <Gamepad2 :size="18" />
-            <span>操作</span>
-            <ChevronDown class="drawer-chevron" :size="17" />
-          </summary>
-          <div class="d-pad">
-            <button class="up" type="button" aria-label="向上" @click="setDirection('up')">↑</button>
-            <button class="left" type="button" aria-label="向左" @click="setDirection('left')">←</button>
-            <button class="center" type="button" :aria-label="paused ? '继续' : '暂停'" @click="togglePause">
-              {{ paused ? "▶" : "Ⅱ" }}
-            </button>
-            <button class="right" type="button" aria-label="向右" @click="setDirection('right')">→</button>
-            <button class="down" type="button" aria-label="向下" @click="setDirection('down')">↓</button>
-          </div>
-        </details>
-
-        <details class="arena-drawer">
+        <details
+          class="arena-skin-drawer"
+          @click.stop
+          @touchstart.stop
+          @touchend.stop
+          @touchmove.stop
+        >
           <summary>
             <Settings :size="18" />
             <span>皮肤</span>
@@ -603,32 +590,52 @@ onUnmounted(() => {
             </button>
           </div>
         </details>
-      </aside>
+        <canvas ref="canvas" class="canvas-board arena-canvas" aria-label="贪吃蛇大作战游戏画布"></canvas>
+      </div>
     </section>
   </GameLayout>
 </template>
 
 <style scoped>
+:global(.snake-arena-layout.game-shell) {
+  padding: 6px;
+}
+
+:global(.snake-arena-layout .game-frame) {
+  width: min(1800px, 100%);
+}
+
+:global(.snake-arena-layout .game-content) {
+  padding: 6px;
+}
+
+.arena-play-panel {
+  height: 100%;
+}
+
+.arena-board-shell {
+  position: relative;
+  padding: 4px;
+}
+
 .arena-canvas {
   aspect-ratio: 1;
 }
 
-.arena-side-panel {
-  gap: 10px;
-  overflow: visible;
-  padding: 0;
-  border: 0;
-  background: transparent;
-}
-
-.arena-drawer {
-  overflow: hidden;
+.arena-skin-drawer {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  z-index: 2;
+  width: min(292px, calc(100% - 20px));
   border: 1px solid rgba(145, 235, 255, 0.2);
   border-radius: var(--radius);
-  background: rgba(7, 13, 27, 0.76);
+  background: rgba(7, 13, 27, 0.88);
+  box-shadow: 0 14px 34px rgba(0, 0, 0, 0.28);
+  overflow: hidden;
 }
 
-.arena-drawer > summary {
+.arena-skin-drawer > summary {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;
   gap: 9px;
@@ -641,15 +648,15 @@ onUnmounted(() => {
   list-style: none;
 }
 
-.arena-drawer > summary::-webkit-details-marker {
+.arena-skin-drawer > summary::-webkit-details-marker {
   display: none;
 }
 
-.arena-drawer > summary svg {
+.arena-skin-drawer > summary svg {
   color: var(--cyan);
 }
 
-.arena-drawer > summary span {
+.arena-skin-drawer > summary span {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -659,11 +666,10 @@ onUnmounted(() => {
   transition: transform 0.18s ease;
 }
 
-.arena-drawer[open] .drawer-chevron {
+.arena-skin-drawer[open] .drawer-chevron {
   transform: rotate(180deg);
 }
 
-.arena-drawer .d-pad,
 .arena-skin-grid {
   margin: 0 12px 12px;
 }
@@ -672,7 +678,7 @@ onUnmounted(() => {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 7px;
-  max-height: 226px;
+  max-height: min(42svh, 226px);
   overflow: auto;
   overscroll-behavior: contain;
 }
@@ -714,25 +720,36 @@ onUnmounted(() => {
 }
 
 @media (max-width: 860px) {
-  .arena-side-panel {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 6px;
-    max-height: none;
+  :global(.snake-arena-layout.game-shell) {
+    padding: 0;
   }
 
-  .arena-drawer {
-    min-width: 0;
+  :global(.snake-arena-layout .game-frame) {
+    border-radius: 0;
   }
 
-  .arena-drawer > summary {
+  :global(.snake-arena-layout .game-content) {
+    padding: 4px;
+  }
+
+  .arena-board-shell {
+    padding: 2px;
+  }
+
+  .arena-skin-drawer {
+    top: 7px;
+    right: 7px;
+    width: min(260px, calc(100% - 14px));
+    border-radius: 10px;
+  }
+
+  .arena-skin-drawer > summary {
     min-height: 38px;
     padding: 0 9px;
     gap: 6px;
     font-size: 0.88rem;
   }
 
-  .arena-drawer .d-pad,
   .arena-skin-grid {
     margin: 0 9px 9px;
   }
@@ -744,8 +761,8 @@ onUnmounted(() => {
 }
 
 @media (max-width: 430px), (max-height: 720px) {
-  .arena-side-panel {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+  .arena-skin-drawer {
+    width: min(218px, calc(100% - 14px));
   }
 
   .arena-skin-grid {
