@@ -272,6 +272,7 @@ export const games = [
     icon: zumaIcon,
     accent: "#facc15",
     description: "向轨道球链发射同色能量球。",
+    hidden: true,
   },
   {
     id: "solitaire",
@@ -373,6 +374,8 @@ export const games = [
     description: "挑战多阶段首领弹幕。",
   },
 ];
+
+export const visibleGames = games.filter((game) => !game.hidden);
 
 export function getGameById(id) {
   return games.find((game) => game.id === id);

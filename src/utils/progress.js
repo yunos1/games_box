@@ -1,4 +1,4 @@
-import { games } from "../data/games";
+import { visibleGames as games } from "../data/games";
 import { getAllLeaderboards, getBestScore, getProgress, getSavedValue, setSavedValue } from "./storage";
 
 const CHALLENGE_KEY = "daily-challenge";
@@ -535,7 +535,7 @@ export function getLeaderboardHighlights(limit = 5) {
 export function getDailyChallenge() {
   const date = todayKey();
   const saved = getSavedValue(CHALLENGE_KEY, null);
-  if (saved?.date === date) return saved;
+  if (saved?.date === date && games.some((game) => game.id === saved.gameId)) return saved;
 
   const seed = hashDate(date);
   const game = games[seed % games.length];

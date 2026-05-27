@@ -16,7 +16,6 @@ const marathonPool = [
   "flappy-bird",
   "asteroid-dodge",
   "bubble-shooter",
-  "zuma",
   "boss-rush",
 ];
 const stageLabels = ["开场热身", "节奏推进", "中段压力", "高能爆发", "终局冲刺"];

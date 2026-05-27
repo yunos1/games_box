@@ -24,7 +24,7 @@ import {
 } from "lucide-vue-next";
 import { useRoute, useRouter } from "vue-router";
 import GameCard from "../components/GameCard.vue";
-import { games } from "../data/games";
+import { visibleGames as games } from "../data/games";
 import { getCampaignSummary, getQuestChain } from "../utils/campaign";
 import { getProgress, getSavedValue, setSavedValue } from "../utils/storage";
 import {
