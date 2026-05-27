@@ -1,6 +1,6 @@
 <script setup>
 import { computed, onMounted, onUnmounted, ref } from "vue";
-import { RouterLink, useRoute } from "vue-router";
+import { RouterLink, useRoute, useRouter } from "vue-router";
 import { ArrowLeft, CheckCircle2, Circle, RotateCcw, Pause, Play, Sparkles, Star, X } from "lucide-vue-next";
 import { getGameById } from "../data/games";
 import { getNextCampaignNode } from "../utils/campaign";
@@ -47,6 +47,7 @@ const props = defineProps({
 
 const emit = defineEmits(["restart", "toggle-pause", "dismiss-result"]);
 const route = useRoute();
+const router = useRouter();
 const homeTabIds = new Set(["featured", "all", "action", "puzzle", "strategy", "progress"]);
 const normalizeHomeTab = (value) => {
   const tab = Array.isArray(value) ? value[0] : value;
@@ -56,6 +57,14 @@ const game = computed(() => getGameById(props.gameId));
 const fromTab = computed(() => normalizeHomeTab(route.query.fromTab));
 const homeTarget = computed(() => (fromTab.value ? { path: "/", query: { tab: fromTab.value } } : "/"));
 const withFromTab = (routePath) => (fromTab.value ? { path: routePath, query: { fromTab: fromTab.value } } : routePath);
+const goHome = () => {
+  const previousPath = window.history.state?.back;
+  if (typeof previousPath === "string" && previousPath.startsWith("/") && !previousPath.startsWith("/game/")) {
+    router.back();
+    return;
+  }
+  router.push(homeTarget.value);
+};
 const dailyVariant = computed(() => getDailyVariantForGame(props.gameId));
 const dailyVariantDone = computed(() => {
   props.progressVersion;
@@ -113,9 +122,9 @@ onUnmounted(() => {
     <div class="starfield" aria-hidden="true"></div>
     <section class="game-frame">
       <header class="game-topbar">
-        <RouterLink class="icon-button" :to="homeTarget" aria-label="返回首页">
+        <button class="icon-button" type="button" aria-label="返回首页" @click="goHome">
           <ArrowLeft :size="20" />
-        </RouterLink>
+        </button>
         <div class="game-title-wrap">
           <img v-if="game" class="game-mini-icon" :src="game.icon" alt="" />
           <div>
