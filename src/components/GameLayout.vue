@@ -73,8 +73,8 @@ const updateCompactMeta = () => {
   const nextCompact = Boolean(metaQuery?.matches);
   if (compactMeta.value === nextCompact) return;
   compactMeta.value = nextCompact;
-  ruleMetaOpen.value = !nextCompact;
-  starMetaOpen.value = !nextCompact;
+  ruleMetaOpen.value = false;
+  starMetaOpen.value = false;
 };
 const syncMetaOpen = (target, event) => {
   const isOpen = event.target.open;

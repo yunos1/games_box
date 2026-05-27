@@ -126,10 +126,11 @@ restart();
 <style scoped>
 .guess-console {
   display: grid;
-  gap: 22px;
+  gap: 14px;
   align-content: center;
-  min-height: 430px;
-  padding: 24px;
+  height: 100%;
+  min-height: 0;
+  padding: 14px;
   border: 1px solid rgba(145, 235, 255, 0.16);
   border-radius: var(--radius);
   background: radial-gradient(circle at center, rgba(83, 243, 255, 0.14), rgba(5, 10, 22, 0.78) 52%);
@@ -138,14 +139,14 @@ restart();
 .target-ring {
   display: grid;
   grid-template-columns: 1fr auto 1fr;
-  gap: 18px;
+  gap: 12px;
   align-items: center;
   justify-items: center;
 }
 
 .target-ring strong {
   display: grid;
-  width: min(52vw, 220px);
+  width: min(52vw, 42cqh, 260px);
   aspect-ratio: 1;
   place-items: center;
   border: 1px solid rgba(83, 243, 255, 0.42);
@@ -164,22 +165,22 @@ restart();
 .guess-form {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
-  gap: 12px;
+  gap: 8px;
   align-items: end;
 }
 
 .history-list {
   display: grid;
-  gap: 8px;
-  max-height: 220px;
+  gap: 6px;
+  max-height: min(220px, 34svh);
   overflow: auto;
 }
 
 .history-list div {
   display: flex;
   justify-content: space-between;
-  gap: 12px;
-  padding: 9px 10px;
+  gap: 8px;
+  padding: 6px 8px;
   border: 1px solid rgba(145, 235, 255, 0.16);
   border-radius: var(--radius);
   background: rgba(5, 10, 22, 0.6);
