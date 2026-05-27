@@ -1,5 +1,5 @@
 <script setup>
-import { computed, ref, watch } from "vue";
+import { computed, onActivated, ref, watch } from "vue";
 import {
   Brain,
   ChartNoAxesColumn,
@@ -39,18 +39,43 @@ import {
   getUnlockedRewards,
 } from "../utils/progress";
 
-const challenge = getDailyChallenge();
-const challengeDone = getDailyChallengeStatus(challenge);
-const dailyRules = getDailyVariantHighlights(4);
-const leaderboard = getLeaderboardHighlights(5);
-const achievements = getUnlockedAchievements();
-const starTotal = getTotalStarCount();
+const homeDataVersion = ref(0);
+const challenge = computed(() => {
+  homeDataVersion.value;
+  return getDailyChallenge();
+});
+const challengeDone = computed(() => {
+  homeDataVersion.value;
+  return getDailyChallengeStatus(challenge.value);
+});
+const dailyRules = computed(() => {
+  homeDataVersion.value;
+  return getDailyVariantHighlights(4);
+});
+const leaderboard = computed(() => {
+  homeDataVersion.value;
+  return getLeaderboardHighlights(5);
+});
+const achievements = computed(() => {
+  homeDataVersion.value;
+  return getUnlockedAchievements();
+});
+const starTotal = computed(() => {
+  homeDataVersion.value;
+  return getTotalStarCount();
+});
 const starMax = games.length * 3;
-const rewards = getUnlockedRewards(starTotal);
-const campaignSummary = getCampaignSummary();
-const questChain = getQuestChain();
-const unlockedCount = computed(() => achievements.filter((item) => item.unlocked).length);
-const rewardCount = computed(() => rewards.filter((item) => item.unlocked).length);
+const rewards = computed(() => getUnlockedRewards(starTotal.value));
+const campaignSummary = computed(() => {
+  homeDataVersion.value;
+  return getCampaignSummary();
+});
+const questChain = computed(() => {
+  homeDataVersion.value;
+  return getQuestChain();
+});
+const unlockedCount = computed(() => achievements.value.filter((item) => item.unlocked).length);
+const rewardCount = computed(() => rewards.value.filter((item) => item.unlocked).length);
 const route = useRoute();
 const router = useRouter();
 const HOME_TAB_KEY = "home:active-tab";
@@ -72,8 +97,11 @@ const makeGameLink = (routePath) => ({
 const makeHomeLink = (routePath) => (routePath?.startsWith("/game/") ? makeGameLink(routePath) : routePath);
 const searchQuery = ref("");
 const libraryView = ref("grid");
-const progress = getProgress();
-const gameProgress = progress.games || {};
+const progress = computed(() => {
+  homeDataVersion.value;
+  return getProgress();
+});
+const gameProgress = computed(() => progress.value.games || {});
 const actionTags = new Set(["动作", "反应", "街机"]);
 const puzzleTags = new Set(["益智", "逻辑", "解谜", "推理"]);
 const strategyCasualTags = new Set(["策略", "冒险", "消除", "休闲"]);
@@ -88,7 +116,7 @@ function findGames(ids) {
 }
 
 function activityTime(game) {
-  const entry = gameProgress[game.id] || {};
+  const entry = gameProgress.value[game.id] || {};
   return entry.lastResultAt || entry.lastPlayedAt || "";
 }
 
@@ -103,7 +131,7 @@ function filterGames(list) {
 }
 
 const recommendedGames = computed(() => {
-  const ids = [challenge.gameId, ...dailyRules.map(({ game }) => game.id)];
+  const ids = [challenge.value.gameId, ...dailyRules.value.map(({ game }) => game.id)];
   const uniqueIds = [...new Set(ids)];
   return uniqueIds.map((id) => games.find((game) => game.id === id)).filter(Boolean).slice(0, 4);
 });
@@ -124,8 +152,9 @@ const recentlyPlayedGames = computed(() =>
     .sort((a, b) => new Date(activityTime(b)) - new Date(activityTime(a)))
     .slice(0, 4),
 );
-const lastPlayedGame = computed(() => games.find((game) => game.id === progress.lastPlayed) || recentlyPlayedGames.value[0] || null);
+const lastPlayedGame = computed(() => games.find((game) => game.id === progress.value.lastPlayed) || recentlyPlayedGames.value[0] || null);
 const starFocus = computed(() => {
+  homeDataVersion.value;
   const candidates = games
     .map((game) => {
       const summary = getGameStarSummary(game.id);
@@ -140,8 +169,8 @@ const starFocus = computed(() => {
   return candidates[0] || null;
 });
 const dailyProgress = computed(() => {
-  const done = dailyRules.filter(({ game }) => getDailyVariantStatus(game.id)).length + (challengeDone ? 1 : 0);
-  const total = dailyRules.length + 1;
+  const done = dailyRules.value.filter(({ game }) => getDailyVariantStatus(game.id)).length + (challengeDone.value ? 1 : 0);
+  const total = dailyRules.value.length + 1;
   return {
     done,
     total,
@@ -189,8 +218,12 @@ const tabs = computed(() => [
   { id: "action", label: "动作街机", shortLabel: "街机", icon: Gamepad2, count: actionGames.value.length },
   { id: "puzzle", label: "益智解谜", shortLabel: "解谜", icon: Brain, count: puzzleGames.value.length },
   { id: "strategy", label: "策略休闲", shortLabel: "策略", icon: Swords, count: strategyCasualGames.value.length },
-  { id: "progress", label: "进度", shortLabel: "进度", icon: ChartNoAxesColumn, count: `${starTotal}/${starMax}` },
+  { id: "progress", label: "进度", shortLabel: "进度", icon: ChartNoAxesColumn, count: `${starTotal.value}/${starMax}` },
 ]);
+
+onActivated(() => {
+  homeDataVersion.value += 1;
+});
 watch(activeTab, (tab) => {
   setSavedValue(HOME_TAB_KEY, tab);
   if (normalizeHomeTab(route.query.tab) !== tab) {
