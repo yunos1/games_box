@@ -91,12 +91,16 @@
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
-  align-items: flex-start;
+  align-items: center;
   padding: 6px 10px 0;
 }
 
 .game-info-row {
-  display: contents;
+  display: flex;
+  flex: 1 1 auto;
+  min-width: 0;
+  gap: 6px;
+  align-items: center;
 }
 
 .stat-chip,
@@ -124,7 +128,13 @@
 }
 
 .status-chip {
+  flex: 1 1 auto;
+  min-width: 0;
+  max-width: fit-content;
   color: var(--yellow);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .game-meta-row {
@@ -883,7 +893,6 @@
 
   .game-info-row {
     gap: 6px;
-    padding: 8px 8px 0;
   }
 
   .stat-chip,
@@ -892,6 +901,14 @@
     padding: 5px 8px;
     gap: 5px;
     font-size: 0.8rem;
+  }
+
+  .stat-chip {
+    flex: 0 0 auto;
+  }
+
+  .status-chip {
+    max-width: none;
   }
 
   .game-content {

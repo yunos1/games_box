@@ -5,8 +5,9 @@ import { createSwipeHandlers } from "../utils/touch";
 import { getBestScore, setBestScore } from "../utils/storage";
 import { getDailyVariantForGame, recordGameResult } from "../utils/progress";
 
-const size = 4;
-const board = ref(Array(size * size).fill(0));
+const cols = 5;
+const rows = 8;
+const board = ref(Array(cols * rows).fill(0));
 const score = ref(0);
 const best = ref(getBestScore("2048"));
 const status = ref("合并到 2048");
@@ -22,8 +23,8 @@ const tiles = computed(() =>
   board.value.map((value, index) => ({
     value,
     index,
-    row: Math.floor(index / size),
-    col: index % size,
+    row: Math.floor(index / cols),
+    col: index % cols,
   })),
 );
 
@@ -52,22 +53,35 @@ function slideLine(line) {
       merged.push(values[i]);
     }
   }
-  while (merged.length < size) merged.push(0);
   return merged;
 }
 
+function padLine(line, length) {
+  const next = slideLine(line);
+  while (next.length < length) next.push(0);
+  return next;
+}
+
 function lineIndexes(direction, line) {
-  if (direction === "left") return [0, 1, 2, 3].map((col) => line * size + col);
-  if (direction === "right") return [3, 2, 1, 0].map((col) => line * size + col);
-  if (direction === "up") return [0, 1, 2, 3].map((row) => row * size + line);
-  return [3, 2, 1, 0].map((row) => row * size + line);
+  if (direction === "left") return Array.from({ length: cols }, (_, col) => line * cols + col);
+  if (direction === "right") return Array.from({ length: cols }, (_, col) => line * cols + (cols - 1 - col));
+  if (direction === "up") return Array.from({ length: rows }, (_, row) => row * cols + line);
+  return Array.from({ length: rows }, (_, row) => (rows - 1 - row) * cols + line);
+}
+
+function lineCount(direction) {
+  return direction === "left" || direction === "right" ? rows : cols;
+}
+
+function lineLength(direction) {
+  return direction === "left" || direction === "right" ? cols : rows;
 }
 
 function canMove() {
   if (emptyIndexes().length) return true;
   for (let index = 0; index < board.value.length; index += 1) {
-    const right = index % size < size - 1 ? index + 1 : -1;
-    const down = index + size < board.value.length ? index + size : -1;
+    const right = index % cols < cols - 1 ? index + 1 : -1;
+    const down = index + cols < board.value.length ? index + cols : -1;
     if (right > 0 && board.value[index] === board.value[right]) return true;
     if (down > 0 && board.value[index] === board.value[down]) return true;
   }
@@ -111,9 +125,9 @@ function showRunResult(title, detail) {
 function move(direction) {
   if (gameOver.value) return;
   const previous = board.value.join(",");
-  for (let line = 0; line < size; line += 1) {
+  for (let line = 0; line < lineCount(direction); line += 1) {
     const indexes = lineIndexes(direction, line);
-    const next = slideLine(indexes.map((index) => board.value[index]));
+    const next = padLine(indexes.map((index) => board.value[index]), lineLength(direction));
     indexes.forEach((index, valueIndex) => {
       board.value[index] = next[valueIndex];
     });
@@ -139,7 +153,7 @@ function move(direction) {
 }
 
 function restart() {
-  board.value = Array(size * size).fill(0);
+  board.value = Array(cols * rows).fill(0);
   score.value = 0;
   moves.value = 0;
   runResult.value = null;
@@ -190,38 +204,37 @@ restart();
     @restart="restart"
     @dismiss-result="runResult = null"
   >
-    <section class="game-panel split-panel">
-      <div class="board-shell" @touchstart.passive="swipe.onTouchStart" @touchend.passive="swipe.onTouchEnd" @touchmove.prevent>
+    <section class="game-panel game-2048-panel">
+      <div class="board-shell board-2048-shell" @touchstart.passive="swipe.onTouchStart" @touchend.passive="swipe.onTouchEnd" @touchmove.prevent>
         <div class="grid-2048">
           <div v-for="tile in tiles" :key="tile.index" class="tile-2048" :class="`v-${tile.value}`">
             <span v-if="tile.value">{{ tile.value }}</span>
           </div>
         </div>
       </div>
-      <aside class="control-panel">
-        <h2>操作</h2>
-        <p>键盘方向键或 WASD 移动。手机上直接在棋盘区域滑动。</p>
-        <div class="d-pad">
-          <button class="up" type="button" @click="move('up')">↑</button>
-          <button class="left" type="button" @click="move('left')">←</button>
-          <button class="center" type="button" @click="restart">•</button>
-          <button class="right" type="button" @click="move('right')">→</button>
-          <button class="down" type="button" @click="move('down')">↓</button>
-        </div>
-      </aside>
     </section>
   </GameLayout>
 </template>
 
 <style scoped>
+.game-2048-panel {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.board-2048-shell {
+  width: 100%;
+  height: 100%;
+}
+
 .grid-2048 {
   display: grid;
-  width: min(88vw, 460px);
-  aspect-ratio: 1;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 10px;
-  padding: 10px;
-  border: 1px solid rgba(145, 235, 255, 0.22);
+  width: min(100cqw, calc(100cqh * 2 / 3)) !important;
+  height: min(100cqh, calc(100cqw * 3 / 2));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-template-rows: repeat(8, minmax(0, 1fr));
+  gap: clamp(5px, 1cqw, 10px);
+  padding: clamp(6px, 1cqw, 8px);
+  border: 0;
   border-radius: var(--radius);
   background: rgba(4, 10, 22, 0.86);
 }
@@ -229,11 +242,14 @@ restart();
 .tile-2048 {
   display: grid;
   place-items: center;
-  border: 1px solid rgba(145, 235, 255, 0.12);
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  border: 0;
   border-radius: var(--radius);
   background: rgba(12, 25, 49, 0.72);
   color: var(--text);
-  font-size: clamp(1.25rem, 6vw, 2.35rem);
+  font-size: clamp(1rem, 4.5cqw, 2rem);
   font-weight: 900;
   line-height: 1;
 }
@@ -247,6 +263,6 @@ restart();
 .v-128 { background: #7a5418; }
 .v-256 { background: #687019; }
 .v-512 { background: #28745a; }
-.v-1024 { background: #176a82; font-size: clamp(1rem, 4.7vw, 1.9rem); }
-.v-2048 { background: #5d3b9e; font-size: clamp(1rem, 4.7vw, 1.9rem); box-shadow: inset 0 0 28px rgba(255, 209, 102, 0.32); }
+.v-1024 { background: #176a82; font-size: clamp(0.82rem, 3.8cqw, 1.55rem); }
+.v-2048 { background: #5d3b9e; font-size: clamp(0.82rem, 3.8cqw, 1.55rem); box-shadow: inset 0 0 28px rgba(255, 209, 102, 0.32); }
 </style>

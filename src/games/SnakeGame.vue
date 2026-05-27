@@ -1,6 +1,6 @@
 <script setup>
 import { computed, onMounted, onUnmounted, ref } from "vue";
-import { ChevronDown, Gamepad2, Settings } from "lucide-vue-next";
+import { ChevronDown, Settings } from "lucide-vue-next";
 import GameLayout from "../components/GameLayout.vue";
 import { createSwipeHandlers } from "../utils/touch";
 import { SNAKE_FOODS } from "../data/snakeFoods";
@@ -33,6 +33,7 @@ let gameOver = false;
 let foodsEaten = 0;
 let maxLength = 3;
 let runNewGoalIds = new Set();
+let resizeObserver;
 const foodImages = new Map();
 let foodBag = [];
 let lastFoodId = "";
@@ -460,8 +461,9 @@ function loop(time) {
 function resize() {
   if (!canvas.value) return;
   const parent = canvas.value.parentElement;
-  const availableWidth = Math.max(280, Math.min(parent.clientWidth - 8, 820));
-  const availableHeight = Math.max(280, parent.clientHeight - 8);
+  if (!parent) return;
+  const availableWidth = Math.max(280, Math.min(parent.clientWidth - 4, 820));
+  const availableHeight = Math.max(280, parent.clientHeight - 4);
   const cell = availableWidth / gridCols;
   gridRows = Math.max(12, Math.floor(availableHeight / cell));
   const width = Math.floor(gridCols * cell);
@@ -507,6 +509,11 @@ onMounted(() => {
   ctx = canvas.value.getContext("2d");
   resize();
   restart();
+  if (typeof ResizeObserver !== "undefined") {
+    resizeObserver = new ResizeObserver(() => resize());
+    resizeObserver.observe(canvas.value.parentElement);
+  }
+  requestAnimationFrame(resize);
   window.addEventListener("resize", resize);
   window.addEventListener("keydown", onKey);
   loopId = requestAnimationFrame(loop);
@@ -514,6 +521,7 @@ onMounted(() => {
 
 onUnmounted(() => {
   cancelAnimationFrame(loopId);
+  resizeObserver?.disconnect();
   window.removeEventListener("resize", resize);
   window.removeEventListener("keydown", onKey);
 });
@@ -544,25 +552,7 @@ onUnmounted(() => {
         <canvas ref="canvas" class="canvas-board" aria-label="贪吃蛇游戏画布"></canvas>
       </div>
       <aside class="control-panel snake-side-panel">
-        <details class="snake-drawer">
-          <summary>
-            <Gamepad2 :size="18" />
-            <span>操作</span>
-            <ChevronDown class="drawer-chevron" :size="17" />
-          </summary>
-          <p>方向键或 WASD 控制，空格暂停。移动端在画布区域滑动。</p>
-          <div class="d-pad">
-            <button class="up" type="button" aria-label="向上" @click="setDirection('up')">↑</button>
-            <button class="left" type="button" aria-label="向左" @click="setDirection('left')">←</button>
-            <button class="center" type="button" :aria-label="paused ? '继续' : '暂停'" @click="togglePause">
-              {{ paused ? "▶" : "Ⅱ" }}
-            </button>
-            <button class="right" type="button" aria-label="向右" @click="setDirection('right')">→</button>
-            <button class="down" type="button" aria-label="向下" @click="setDirection('down')">↓</button>
-          </div>
-        </details>
-
-        <details class="snake-drawer">
+        <details class="snake-drawer" open>
           <summary>
             <Settings :size="18" />
             <span>设置</span>
@@ -577,14 +567,12 @@ onUnmounted(() => {
               :style="{ '--skin': skin.body, '--skin-alt': skin.bodyAlt, '--skin-glow': skin.glow }"
               type="button"
               role="listitem"
+              :title="`${skin.name} - ${skin.subtitle}`"
+              :aria-label="skin.name"
               :aria-pressed="selectedSkinId === skin.id"
               @click="selectSkin(skin.id)"
             >
               <img :src="skin.preview" alt="" />
-              <span>
-                <strong>{{ skin.name }}</strong>
-                <small>{{ skin.subtitle }}</small>
-              </span>
             </button>
           </div>
         </details>
@@ -611,8 +599,8 @@ onUnmounted(() => {
 }
 
 .snake-play-panel {
-  grid-template-columns: minmax(0, 1fr) minmax(190px, 230px);
-  gap: 12px;
+  grid-template-columns: minmax(0, 1fr) 118px;
+  gap: 8px;
   align-items: stretch;
 }
 
@@ -627,7 +615,7 @@ onUnmounted(() => {
 }
 
 .snake-side-panel {
-  gap: 10px;
+  gap: 0;
   overflow: visible;
   padding: 0;
   border: 0;
@@ -644,12 +632,13 @@ onUnmounted(() => {
 .snake-drawer > summary {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;
-  gap: 9px;
+  gap: 7px;
   align-items: center;
-  min-height: 46px;
-  padding: 0 12px;
+  min-height: 38px;
+  padding: 0 9px;
   color: var(--text);
   cursor: pointer;
+  font-size: 0.84rem;
   font-weight: 900;
   list-style: none;
 }
@@ -676,38 +665,30 @@ onUnmounted(() => {
   transform: rotate(180deg);
 }
 
-.snake-drawer p {
-  padding: 0 12px 10px;
-  font-size: 0.84rem;
-  line-height: 1.5;
-}
-
-.snake-drawer .d-pad,
 .snake-drawer .snake-skin-grid {
-  margin: 0 12px 12px;
+  margin: 0 8px 8px;
 }
 
 .snake-skin-grid {
   display: grid;
-  grid-template-columns: 1fr;
-  gap: 8px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
 }
 
 .snake-skin-option {
+  position: relative;
   display: grid;
-  grid-template-columns: 42px minmax(0, 1fr);
-  gap: 8px;
-  align-items: center;
-  min-height: 58px;
-  padding: 7px;
+  place-items: center;
+  aspect-ratio: 1;
+  min-height: 0;
+  padding: 5px;
   border: 1px solid rgba(145, 235, 255, 0.18);
-  border-radius: 10px;
+  border-radius: 8px;
   background:
     linear-gradient(135deg, color-mix(in srgb, var(--skin), transparent 84%), rgba(5, 10, 22, 0.62)),
     rgba(6, 13, 28, 0.74);
   color: var(--text);
   cursor: pointer;
-  text-align: left;
   transition:
     border-color 0.18s ease,
     box-shadow 0.18s ease,
@@ -724,36 +705,24 @@ onUnmounted(() => {
   transform: translateY(-1px);
 }
 
+.snake-skin-option.active::after {
+  position: absolute;
+  right: 5px;
+  bottom: 5px;
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--cyan);
+  box-shadow: 0 0 10px var(--cyan);
+  content: "";
+}
+
 .snake-skin-option img {
-  width: 44px;
-  height: 44px;
-  border-radius: 8px;
+  width: min(42px, 100%);
+  height: min(42px, 100%);
+  border-radius: 7px;
   object-fit: cover;
   box-shadow: 0 0 14px color-mix(in srgb, var(--skin-glow), transparent 58%);
-}
-
-.snake-skin-option span,
-.snake-skin-option strong,
-.snake-skin-option small {
-  display: block;
-  min-width: 0;
-}
-
-.snake-skin-option strong,
-.snake-skin-option small {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.snake-skin-option strong {
-  font-size: 0.78rem;
-}
-
-.snake-skin-option small {
-  margin-top: 2px;
-  color: var(--muted);
-  font-size: 0.68rem;
 }
 
 @media (max-width: 860px) {
@@ -785,10 +754,8 @@ onUnmounted(() => {
   }
 
   .snake-side-panel {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 6px;
-    max-height: none;
+    max-height: 76px;
+    overflow: hidden;
   }
 
   .snake-drawer {
@@ -796,68 +763,51 @@ onUnmounted(() => {
   }
 
   .snake-drawer > summary {
-    min-height: 38px;
+    min-height: 32px;
     padding: 0 9px;
     gap: 6px;
-    font-size: 0.88rem;
+    font-size: 0.8rem;
   }
 
-  .snake-drawer p {
-    padding: 0 9px 8px;
-    font-size: 0.76rem;
-  }
-
-  .snake-drawer .d-pad,
   .snake-drawer .snake-skin-grid {
-    margin: 0 9px 9px;
+    margin: 0 8px 7px;
   }
 
   .snake-skin-grid {
-    grid-template-columns: 1fr;
-    max-height: min(34svh, 220px);
-    overflow: auto;
+    grid-auto-columns: 42px;
+    grid-auto-flow: column;
+    grid-template-columns: none;
+    overflow-x: auto;
+    overflow-y: hidden;
     overscroll-behavior: contain;
+    padding-bottom: 2px;
   }
 
   .snake-skin-option {
-    min-height: 52px;
-    grid-template-columns: 38px minmax(0, 1fr);
-    padding: 6px;
+    width: 42px;
+    height: 42px;
+    padding: 4px;
   }
 
   .snake-skin-option img {
-    width: 38px;
-    height: 38px;
+    width: 34px;
+    height: 34px;
   }
 }
 
 @media (max-width: 520px) {
   .snake-side-panel {
-    grid-template-columns: 1fr 1fr;
+    max-height: 70px;
   }
 
   .snake-drawer > summary {
-    min-height: 36px;
+    min-height: 30px;
   }
 }
 
 @media (max-width: 430px), (max-height: 720px) {
   .snake-play-panel {
     grid-template-rows: minmax(0, 1fr) auto;
-  }
-
-  .snake-side-panel {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
-  .snake-drawer p {
-    display: none;
-  }
-
-  .snake-drawer .d-pad {
-    grid-template-columns: repeat(3, 38px);
-    grid-template-rows: repeat(3, 32px);
-    gap: 5px;
   }
 }
 </style>
