@@ -24,29 +24,22 @@ function shuffle(items) {
   return copy;
 }
 
-function restart() {
+function createTilePool() {
   const pool = [];
   for (let index = 0; index < (rows * cols) / 2; index += 1) {
     const symbol = symbols[index % symbols.length];
     pool.push(symbol, symbol);
   }
-  tiles.value = shuffle(pool);
-  selected.value = null;
-  score.value = 0;
-  status.value = "连接相同芯片";
-}
-
-function toIndex(row, col) {
-  return row * cols + col;
+  return pool;
 }
 
 function toPos(index) {
   return { row: Math.floor(index / cols), col: index % cols };
 }
 
-function buildMatrix(targetIndex) {
+function buildMatrix(targetIndex, board = tiles.value) {
   const matrix = Array.from({ length: rows + 2 }, () => Array(cols + 2).fill(""));
-  tiles.value.forEach((value, index) => {
+  board.forEach((value, index) => {
     if (!value || index === targetIndex) return;
     const { row, col } = toPos(index);
     matrix[row + 1][col + 1] = value;
@@ -54,12 +47,12 @@ function buildMatrix(targetIndex) {
   return matrix;
 }
 
-function canConnect(first, second) {
-  if (first === second || tiles.value[first] !== tiles.value[second]) return false;
+function canConnect(first, second, board = tiles.value) {
+  if (first === second || board[first] !== board[second]) return false;
   const start = toPos(first);
   const end = toPos(second);
   const target = { row: end.row + 1, col: end.col + 1 };
-  const matrix = buildMatrix(second);
+  const matrix = buildMatrix(second, board);
   const queue = [];
   const seen = new Set();
   const moves = [
@@ -94,6 +87,103 @@ function canConnect(first, second) {
   return false;
 }
 
+function findConnectablePair(board = tiles.value) {
+  for (let first = 0; first < board.length; first += 1) {
+    if (!board[first]) continue;
+    for (let second = first + 1; second < board.length; second += 1) {
+      if (board[first] === board[second] && canConnect(first, second, board)) {
+        return [first, second];
+      }
+    }
+  }
+  return null;
+}
+
+function createGuaranteedLayout(values, openIndexes = Array.from({ length: rows * cols }, (_, index) => index)) {
+  const pairSymbol = values.find((value, index) => values.indexOf(value) !== index);
+  const board = Array(rows * cols).fill("");
+  if (!pairSymbol) {
+    values.forEach((value, index) => {
+      board[openIndexes[index]] = value;
+    });
+    return board;
+  }
+
+  const rest = [];
+  let skipped = 0;
+  values.forEach((value) => {
+    if (value === pairSymbol && skipped < 2) {
+      skipped += 1;
+      return;
+    }
+    rest.push(value);
+  });
+
+  const probe = Array(rows * cols).fill("");
+  openIndexes.forEach((index) => {
+    probe[index] = "__block";
+  });
+  const pairPositions =
+    openIndexes
+      .flatMap((first, index) => openIndexes.slice(index + 1).map((second) => [first, second]))
+      .find(([first, second]) => {
+        probe[first] = "__pair";
+        probe[second] = "__pair";
+        const connects = canConnect(first, second, probe);
+        probe[first] = "__block";
+        probe[second] = "__block";
+        return connects;
+      }) || openIndexes.slice(0, 2);
+
+  board[pairPositions[0]] = pairSymbol;
+  board[pairPositions[1]] = pairSymbol;
+  const pairSet = new Set(pairPositions);
+  const positions = shuffle(openIndexes.filter((index) => !pairSet.has(index)));
+  shuffle(rest).forEach((value, index) => {
+    board[positions[index]] = value;
+  });
+  return board;
+}
+
+function createPlayableLayout(values, fixedEmptyIndexes = null) {
+  for (let attempt = 0; attempt < 160; attempt += 1) {
+    const next = Array(rows * cols).fill("");
+    const openIndexes = fixedEmptyIndexes
+      ? Array.from({ length: rows * cols }, (_, index) => index).filter((index) => !fixedEmptyIndexes.has(index))
+      : Array.from({ length: rows * cols }, (_, index) => index);
+    const positions = shuffle(openIndexes);
+
+    shuffle(values).forEach((value, index) => {
+      next[positions[index]] = value;
+    });
+
+    if (findConnectablePair(next)) return next;
+  }
+
+  const openIndexes = fixedEmptyIndexes
+    ? Array.from({ length: rows * cols }, (_, index) => index).filter((index) => !fixedEmptyIndexes.has(index))
+    : Array.from({ length: rows * cols }, (_, index) => index);
+  return createGuaranteedLayout(values, openIndexes);
+}
+
+function reshuffleIfBlocked() {
+  if (remaining.value === 0 || findConnectablePair()) return false;
+
+  const values = tiles.value.filter(Boolean);
+  const emptyIndexes = new Set(tiles.value.map((tile, index) => (tile ? -1 : index)).filter((index) => index >= 0));
+  const next = createPlayableLayout(values, emptyIndexes);
+  tiles.value = next;
+  selected.value = null;
+  return true;
+}
+
+function restart() {
+  tiles.value = createPlayableLayout(createTilePool());
+  selected.value = null;
+  score.value = 0;
+  status.value = "连接相同芯片";
+}
+
 function choose(index) {
   if (!tiles.value[index]) return;
   if (selected.value === null) {
@@ -112,8 +202,12 @@ function choose(index) {
     score.value += 40;
     best.value = setBestScore("link-link", score.value);
     selected.value = null;
-    status.value = remaining.value === 0 ? "全部清除" : "连接成功";
-    if (remaining.value === 0) best.value = setBestScore("link-link", score.value + 200);
+    if (remaining.value === 0) {
+      best.value = setBestScore("link-link", score.value + 200);
+      status.value = "全部清除";
+      return;
+    }
+    status.value = reshuffleIfBlocked() ? "连接成功，已自动洗牌" : "连接成功";
   } else {
     selected.value = index;
     status.value = "线路受阻，换一组试试";
