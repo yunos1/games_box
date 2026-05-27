@@ -266,6 +266,8 @@ restart();
   justify-items: center;
   width: 100%;
   height: 100%;
+  min-height: 0;
+  overflow: hidden;
   padding: 8px;
   touch-action: none;
 }
@@ -276,8 +278,10 @@ restart();
   gap: clamp(3px, 1.1vmin, 5px);
   width: 100%;
   max-width: 620px;
+  max-height: 100%;
   margin: 0 auto;
   padding: 12px;
+  overflow: hidden;
   border: 1px solid rgba(145, 235, 255, 0.22);
   border-radius: var(--radius);
   background:
@@ -289,6 +293,7 @@ restart();
   display: grid;
   grid-template-columns: repeat(10, minmax(0, 1fr));
   gap: clamp(3px, 1.1vmin, 5px);
+  min-height: 0;
 }
 
 .bubble-row.odd {
@@ -301,6 +306,7 @@ restart();
   aspect-ratio: 1;
   place-items: center;
   min-width: 0;
+  min-height: 0;
   border: 1px solid rgba(145, 235, 255, 0.14);
   border-radius: 50%;
   background: rgba(12, 25, 49, 0.56);

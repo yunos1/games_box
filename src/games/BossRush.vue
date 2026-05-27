@@ -305,12 +305,19 @@ onUnmounted(() => {
         ></canvas>
       </div>
       <aside class="control-panel">
-        <h2>Boss 状态</h2>
+        <div class="mini-stat-grid">
+          <div>
+            <span>血量</span>
+            <strong>{{ bossHp }}%</strong>
+          </div>
+          <div>
+            <span>阶段</span>
+            <strong>{{ phase }}</strong>
+          </div>
+        </div>
         <div class="boss-meter" aria-label="Boss 血量">
           <span :style="{ width: `${bossHp}%` }"></span>
         </div>
-        <p>血量：{{ bossHp }}%　阶段：{{ phase }}</p>
-        <p>WASD / 方向键移动，自动射击。移动端拖动战机躲避弹幕。</p>
       </aside>
     </section>
   </GameLayout>

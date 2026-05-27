@@ -256,9 +256,12 @@ onBeforeUnmount(clearCelebrationTimer);
   position: relative;
   display: grid;
   width: min(100%, 520px);
-  gap: 16px;
+  max-height: 100%;
+  gap: 8px;
   justify-items: stretch;
-  padding: 18px;
+  overflow: auto;
+  overscroll-behavior: contain;
+  padding: 10px;
 }
 
 .wordle-panel :deep(.board-shell) {
@@ -345,8 +348,8 @@ onBeforeUnmount(clearCelebrationTimer);
 
 .wordle-intro {
   display: grid;
-  gap: 8px;
-  padding: 14px;
+  gap: 6px;
+  padding: 10px;
   border: 1px solid rgba(145, 235, 255, 0.16);
   border-radius: var(--radius);
   background: rgba(3, 8, 18, 0.5);
@@ -358,10 +361,11 @@ onBeforeUnmount(clearCelebrationTimer);
 }
 
 .wordle-intro h2 {
-  font-size: 1.15rem;
+  font-size: 1rem;
 }
 
 .wordle-intro p {
+  display: none;
   color: var(--muted);
   line-height: 1.55;
 }
@@ -398,8 +402,8 @@ onBeforeUnmount(clearCelebrationTimer);
 
 .wordle-clue-box {
   display: grid;
-  gap: 10px;
-  padding: 14px;
+  gap: 6px;
+  padding: 10px;
   border: 1px solid rgba(34, 197, 94, 0.22);
   border-radius: var(--radius);
   background: rgba(10, 34, 24, 0.42);
@@ -425,17 +429,18 @@ onBeforeUnmount(clearCelebrationTimer);
 
 .wordle-clue-box ul {
   display: grid;
-  gap: 6px;
+  gap: 4px;
   margin: 0;
   padding-left: 18px;
   color: var(--text);
-  line-height: 1.55;
+  font-size: 0.84rem;
+  line-height: 1.35;
 }
 
 .wordle-form {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
-  gap: 10px;
+  gap: 8px;
   align-items: end;
 }
 
@@ -468,15 +473,15 @@ onBeforeUnmount(clearCelebrationTimer);
 
 .wordle-board {
   display: grid;
-  gap: 8px;
-  width: min(100%, 360px);
+  gap: 5px;
+  width: min(100%, 300px);
   justify-self: center;
 }
 
 .wordle-row {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
-  gap: 8px;
+  gap: 5px;
 }
 
 .wordle-cell {
@@ -486,7 +491,7 @@ onBeforeUnmount(clearCelebrationTimer);
   border: 1px solid rgba(145, 235, 255, 0.22);
   border-radius: var(--radius);
   background: rgba(12, 25, 49, 0.72);
-  font-size: clamp(1.4rem, 8vw, 2.4rem);
+  font-size: clamp(1.18rem, 5vw, 1.9rem);
   font-weight: 900;
 }
 

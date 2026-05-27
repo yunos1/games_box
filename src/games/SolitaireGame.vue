@@ -60,7 +60,7 @@ restart();
 
 <template>
   <GameLayout game-id="solitaire" :score="score" :best="best" :moves="moves" :status="status" @restart="restart">
-    <section class="game-panel split-panel">
+    <section class="game-panel">
       <div class="board-shell">
         <div class="solitaire-table">
           <button class="card pile" type="button" @click="draw">{{ deck.length ? deck.length : "空" }}</button>
@@ -70,10 +70,6 @@ restart();
           </button>
         </div>
       </div>
-      <aside class="control-panel">
-        <h2>规则</h2>
-        <p>点击牌堆抽牌。废牌只能按 A 到 K 的顺序放入对应花色基座。</p>
-      </aside>
     </section>
   </GameLayout>
 </template>

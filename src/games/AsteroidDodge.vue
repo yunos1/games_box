@@ -51,7 +51,7 @@ onUnmounted(() => window.clearInterval(timer));
 
 <template>
   <GameLayout game-id="asteroid-dodge" :score="score" :best="best" :status="status" @restart="restart">
-    <section class="game-panel split-panel">
+    <section class="game-panel">
       <div class="board-shell">
         <div class="dodge-arena" @mousemove="moveTo" @touchmove.prevent="moveTo" @touchstart.prevent="moveTo">
           <span class="ship" :style="{ left: `${player.x}%`, top: `${player.y}%` }">▲</span>
@@ -63,10 +63,6 @@ onUnmounted(() => window.clearInterval(timer));
           ></span>
         </div>
       </div>
-      <aside class="control-panel">
-        <h2>操作</h2>
-        <p>鼠标或手指拖动飞船，尽量在陨石雨中存活。</p>
-      </aside>
     </section>
   </GameLayout>
 </template>

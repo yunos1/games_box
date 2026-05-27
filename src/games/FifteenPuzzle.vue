@@ -51,7 +51,7 @@ restart();
 
 <template>
   <GameLayout game-id="fifteen-puzzle" :score="score" :best="best" :moves="moves" :status="status" @restart="restart">
-    <section class="game-panel split-panel">
+    <section class="game-panel">
       <div class="board-shell">
         <div class="fifteen-board">
           <button v-for="(tile, index) in tiles" :key="index" class="fifteen-tile" :class="{ empty: tile === 0 }" type="button" @click="slide(index)">
@@ -59,10 +59,6 @@ restart();
           </button>
         </div>
       </div>
-      <aside class="control-panel">
-        <h2>规则</h2>
-        <p>点击空格旁边的数字进行滑动，最终排列为 1 到 15。</p>
-      </aside>
     </section>
   </GameLayout>
 </template>

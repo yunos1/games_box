@@ -105,9 +105,16 @@ restart();
         </div>
       </div>
       <aside class="control-panel">
-        <h2>局势</h2>
-        <p>黑子：{{ blackCount }}　白子：{{ whiteCount }}</p>
-        <p>点击合法空格，夹住对方棋子即可翻转。</p>
+        <div class="mini-stat-grid">
+          <div>
+            <span>黑子</span>
+            <strong>{{ blackCount }}</strong>
+          </div>
+          <div>
+            <span>白子</span>
+            <strong>{{ whiteCount }}</strong>
+          </div>
+        </div>
       </aside>
     </section>
   </GameLayout>

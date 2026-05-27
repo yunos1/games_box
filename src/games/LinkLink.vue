@@ -125,7 +125,7 @@ restart();
 
 <template>
   <GameLayout game-id="link-link" :score="score" :best="best" :moves="remaining" :status="status" @restart="restart">
-    <section class="game-panel split-panel">
+    <section class="game-panel">
       <div class="board-shell">
         <div class="link-board">
           <button
@@ -140,11 +140,6 @@ restart();
           </button>
         </div>
       </div>
-      <aside class="control-panel">
-        <h2>规则</h2>
-        <p>选择两个相同芯片。连接线路可以穿过空格，最多允许两次转弯。</p>
-        <p>剩余芯片：{{ remaining }}</p>
-      </aside>
     </section>
   </GameLayout>
 </template>

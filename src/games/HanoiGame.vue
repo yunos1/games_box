@@ -51,7 +51,7 @@ restart();
 
 <template>
   <GameLayout game-id="hanoi" :score="score" :best="best" :moves="moves" :status="status" @restart="restart">
-    <section class="game-panel split-panel">
+    <section class="game-panel">
       <div class="board-shell">
         <div class="hanoi-board">
           <button
@@ -66,10 +66,6 @@ restart();
           </button>
         </div>
       </div>
-      <aside class="control-panel">
-        <h2>规则</h2>
-        <p>点击源塔再点击目标塔。一次只能移动最上方圆盘，大盘不能压小盘。</p>
-      </aside>
     </section>
   </GameLayout>
 </template>

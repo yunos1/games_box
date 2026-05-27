@@ -9,7 +9,11 @@ const current = ref("B");
 const winner = ref("");
 const moves = ref(0);
 const best = ref(getBestScore("gomoku"));
-const status = computed(() => (winner.value ? `${winner.value === "B" ? "黑子" : "白子"}获胜` : `${current.value === "B" ? "黑子" : "白子"}落子`));
+const status = computed(() => {
+  if (winner.value === "draw") return "平局";
+  if (winner.value) return `${winner.value === "B" ? "黑子" : "白子"}获胜`;
+  return `${current.value === "B" ? "黑子" : "白子"}落子`;
+});
 
 function indexOf(x, y) {
   return y * size + x;
@@ -66,7 +70,7 @@ restart();
 
 <template>
   <GameLayout game-id="gomoku" :score="moves" :best="best" :status="status" @restart="restart">
-    <section class="game-panel split-panel">
+    <section class="game-panel">
       <div class="board-shell">
         <div class="gomoku-board">
           <button v-for="(cell, index) in board" :key="index" class="gomoku-cell" type="button" @click="play(index)">
@@ -74,10 +78,6 @@ restart();
           </button>
         </div>
       </div>
-      <aside class="control-panel">
-        <h2>规则</h2>
-        <p>本地双人轮流落子，横、竖或斜向先连成五子获胜。</p>
-      </aside>
     </section>
   </GameLayout>
 </template>

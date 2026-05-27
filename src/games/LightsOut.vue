@@ -47,16 +47,12 @@ restart();
 
 <template>
   <GameLayout game-id="lights-out" :score="score" :best="best" :moves="moves" :status="status" @restart="restart">
-    <section class="game-panel split-panel">
+    <section class="game-panel">
       <div class="board-shell">
         <div class="lights-board">
           <button v-for="(light, index) in lights" :key="index" class="light-cell" :class="{ on: light }" type="button" @click="press(index)"></button>
         </div>
       </div>
-      <aside class="control-panel">
-        <h2>规则</h2>
-        <p>点击一个灯会翻转自身和上下左右，目标是让所有灯熄灭。</p>
-      </aside>
     </section>
   </GameLayout>
 </template>
