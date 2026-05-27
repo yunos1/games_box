@@ -358,6 +358,7 @@ onUnmounted(() => window.removeEventListener("keydown", onKey));
   width: min(88vw, 520px);
   aspect-ratio: 1;
   grid-template-columns: repeat(9, 1fr);
+  grid-template-rows: repeat(9, 1fr);
   gap: 5px;
   padding: 10px;
   border: 1px solid rgba(145, 235, 255, 0.24);
@@ -367,11 +368,23 @@ onUnmounted(() => window.removeEventListener("keydown", onKey));
 
 .dungeon-cell {
   display: grid;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
   place-items: center;
   border-radius: 5px;
   background: rgba(12, 25, 49, 0.62);
   color: var(--cyan);
   font-weight: 900;
+  line-height: 1;
+}
+
+.dungeon-cell > span {
+  display: grid;
+  width: 100%;
+  height: 100%;
+  place-items: center;
+  line-height: 1;
 }
 
 .dungeon-cell.wall { background: #1f2937; }

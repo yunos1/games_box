@@ -321,6 +321,7 @@ onUnmounted(() => window.clearInterval(timer));
   width: min(88vw, 520px);
   aspect-ratio: 1;
   grid-template-columns: repeat(9, 1fr);
+  grid-template-rows: repeat(9, 1fr);
   gap: 5px;
   padding: 10px;
   border: 1px solid rgba(145, 235, 255, 0.24);
@@ -330,12 +331,24 @@ onUnmounted(() => window.clearInterval(timer));
 
 .td-cell {
   display: grid;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
   place-items: center;
   border: 1px solid rgba(145, 235, 255, 0.12);
   border-radius: 5px;
   background: rgba(12, 25, 49, 0.6);
   color: var(--cyan);
   font-weight: 900;
+  line-height: 1;
+}
+
+.td-cell > span {
+  display: grid;
+  width: 100%;
+  height: 100%;
+  place-items: center;
+  line-height: 1;
 }
 
 .td-cell.path { background: rgba(34, 211, 238, 0.18); }

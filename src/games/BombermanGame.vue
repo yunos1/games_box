@@ -272,6 +272,7 @@ onUnmounted(() => {
   width: min(92vw, 620px);
   aspect-ratio: 13 / 11;
   grid-template-columns: repeat(13, 1fr);
+  grid-template-rows: repeat(11, 1fr);
   gap: 4px;
   padding: 8px;
   border: 1px solid rgba(145, 235, 255, 0.24);
@@ -281,12 +282,24 @@ onUnmounted(() => {
 
 .bomber-cell {
   display: grid;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
   place-items: center;
   border-radius: 4px;
   background: rgba(12, 25, 49, 0.56);
   color: var(--text);
   font-size: clamp(0.78rem, 3vw, 1.35rem);
   font-weight: 900;
+  line-height: 1;
+}
+
+.bomber-cell > span {
+  display: grid;
+  width: 100%;
+  height: 100%;
+  place-items: center;
+  line-height: 1;
 }
 
 .bomber-cell.wall { background: #1f2937; }

@@ -258,6 +258,7 @@ onUnmounted(() => {
   width: min(88vw, 560px);
   aspect-ratio: 1;
   grid-template-columns: repeat(13, 1fr);
+  grid-template-rows: repeat(13, 1fr);
   gap: 4px;
   padding: 8px;
   border: 1px solid rgba(145, 235, 255, 0.24);
@@ -267,6 +268,9 @@ onUnmounted(() => {
 
 .tank-cell {
   display: grid;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
   place-items: center;
   border: 1px solid rgba(145, 235, 255, 0.08);
   border-radius: 4px;
@@ -274,6 +278,15 @@ onUnmounted(() => {
   color: var(--cyan);
   font-size: clamp(0.82rem, 3vw, 1.35rem);
   font-weight: 900;
+  line-height: 1;
+}
+
+.tank-cell > span {
+  display: grid;
+  width: 100%;
+  height: 100%;
+  place-items: center;
+  line-height: 1;
 }
 
 .tank-cell.wall {
