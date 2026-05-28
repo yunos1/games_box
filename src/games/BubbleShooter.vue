@@ -27,6 +27,7 @@ const moves = ref(0);
 const status = ref("点击任意列发射泡泡");
 const finished = ref(false);
 const runResult = ref(null);
+const flyingBubble = ref(null); // 飞行中的泡泡
 
 let aimCol = Math.floor(cols / 2);
 let launcherX = 50;
@@ -36,6 +37,8 @@ let cachedGridRect = null;
 let resizeObserver = null;
 let isPointerDown = false;
 let pointerDownCol = null;
+let animationFrame = null;
+let isShooting = false;
 
 function randomColor() {
   return Math.floor(Math.random() * colors.length);
@@ -160,6 +163,14 @@ function shootFromColumn(col, event) {
 }
 
 function restart() {
+  // 清理飞行动画
+  if (animationFrame) {
+    cancelAnimationFrame(animationFrame);
+    animationFrame = null;
+  }
+  flyingBubble.value = null;
+  isShooting = false;
+
   board.value = Array.from({ length: rows }, (_, row) =>
     Array.from({ length: cols }, () => (row < 5 ? randomColor() : null)),
   );
@@ -234,12 +245,93 @@ function dropFloating() {
   return dropped;
 }
 
+// 计算泡泡在网格中的实际位置
+function getBubblePosition(row, col) {
+  const gridRect = gridRef.value?.getBoundingClientRect();
+  if (!gridRect) return null;
+
+  const bubbleCells = gridRef.value?.querySelectorAll('.bubble-cell');
+  if (!bubbleCells || bubbleCells.length === 0) return null;
+
+  const cellIndex = row * cols + col;
+  const targetCell = bubbleCells[cellIndex];
+  if (!targetCell) return null;
+
+  const cellRect = targetCell.getBoundingClientRect();
+  const stageRect = stageRef.value?.getBoundingClientRect();
+  if (!stageRect) return null;
+
+  return {
+    x: cellRect.left + cellRect.width / 2 - stageRect.left,
+    y: cellRect.top + cellRect.height / 2 - stageRect.top,
+  };
+}
+
+// 获取发射器位置
+function getLauncherPosition() {
+  const stageRect = stageRef.value?.getBoundingClientRect();
+  if (!stageRect) return null;
+
+  const launcherHead = stageRef.value?.querySelector('.bubble-launcher-head');
+  if (!launcherHead) return null;
+
+  const launcherRect = launcherHead.getBoundingClientRect();
+  return {
+    x: launcherRect.left + launcherRect.width / 2 - stageRect.left,
+    y: launcherRect.top + launcherRect.height / 2 - stageRect.top,
+  };
+}
+
+// 飞行动画
+function animateBubbleFlight(targetRow, targetCol, color, onComplete) {
+  const startPos = getLauncherPosition();
+  const endPos = getBubblePosition(targetRow, targetCol);
+
+  if (!startPos || !endPos) {
+    onComplete();
+    return;
+  }
+
+  const startTime = performance.now();
+  const duration = 300; // 飞行时长（毫秒）
+
+  flyingBubble.value = {
+    color,
+    x: startPos.x,
+    y: startPos.y,
+  };
+
+  function animate(currentTime) {
+    const elapsed = currentTime - startTime;
+    const progress = Math.min(elapsed / duration, 1);
+
+    // 使用缓动函数（easeOutQuad）
+    const easeProgress = 1 - (1 - progress) * (1 - progress);
+
+    flyingBubble.value.x = startPos.x + (endPos.x - startPos.x) * easeProgress;
+    flyingBubble.value.y = startPos.y + (endPos.y - startPos.y) * easeProgress;
+
+    if (progress < 1) {
+      animationFrame = requestAnimationFrame(animate);
+    } else {
+      flyingBubble.value = null;
+      onComplete();
+    }
+  }
+
+  animationFrame = requestAnimationFrame(animate);
+}
+
 function shoot(col) {
-  if (finished.value) return;
+  if (finished.value || isShooting) return;
+
+  isShooting = true;
   let hitRow = rows - 1;
   while (hitRow >= 0 && board.value[hitRow][col] === null) hitRow -= 1;
   const placeRow = hitRow + 1;
+
   if (placeRow >= rows) {
+    isShooting = false;
     status.value = "这一列已经触底";
     finished.value = true;
     best.value = setBestScore("bubble-shooter", score.value);
@@ -261,71 +353,81 @@ function shoot(col) {
     return;
   }
 
-  board.value[placeRow][col] = current.value;
-  moves.value += 1;
-  const group = collectGroup(placeRow, col, current.value);
-  if (group.length >= 3) {
-    group.forEach(([row, itemCol]) => {
-      board.value[row][itemCol] = null;
-    });
-    const dropped = dropFloating();
-    const gained = group.length * 30 + dropped * 45;
-    score.value += gained;
-    best.value = setBestScore("bubble-shooter", score.value);
-    status.value = `消除 ${group.length} 个泡泡${dropped ? `，坠落 ${dropped} 个` : ""}`;
-  } else {
-    status.value = "继续寻找三连";
-  }
+  const bubbleColor = current.value;
 
-  refreshBoard();
+  // 启动飞行动画
+  animateBubbleFlight(placeRow, col, bubbleColor, () => {
+    // 动画完成后执行游戏逻辑
+    board.value[placeRow][col] = bubbleColor;
+    moves.value += 1;
+    const group = collectGroup(placeRow, col, bubbleColor);
 
-  const activeColors = activeColorIndexes();
-  if (!activeColors.length) {
-    finished.value = true;
-    score.value += 500;
-    best.value = setBestScore("bubble-shooter", score.value);
-    status.value = "全清完成";
-    const result = recordGameResult("bubble-shooter", {
-      score: score.value,
-      moves: moves.value,
-      won: true,
-      completed: true,
-    });
-    runResult.value = {
-      title: "完美全清！",
-      detail: "所有泡泡已消除，获得 500 分奖励",
-      stats: [
-        { label: "得分", value: score.value },
-        { label: "步数", value: moves.value },
-      ],
-      ...result,
-    };
-    return;
-  }
+    if (group.length >= 3) {
+      group.forEach(([row, itemCol]) => {
+        board.value[row][itemCol] = null;
+      });
+      const dropped = dropFloating();
+      const gained = group.length * 30 + dropped * 45;
+      score.value += gained;
+      best.value = setBestScore("bubble-shooter", score.value);
+      status.value = `消除 ${group.length} 个泡泡${dropped ? `，坠落 ${dropped} 个` : ""}`;
+    } else {
+      status.value = "继续寻找三连";
+    }
 
-  if (board.value[rows - 1].some((value) => value !== null)) {
-    finished.value = true;
-    best.value = setBestScore("bubble-shooter", score.value);
-    status.value = "泡泡触底";
-    const result = recordGameResult("bubble-shooter", {
-      score: score.value,
-      moves: moves.value,
-      won: false,
-      completed: true,
-    });
-    runResult.value = {
-      title: "游戏结束",
-      detail: "泡泡触底",
-      stats: [
-        { label: "得分", value: score.value },
-        { label: "步数", value: moves.value },
-      ],
-      ...result,
-    };
-    return;
-  }
+    refreshBoard();
 
-  advanceQueue(activeColors);
+    const activeColors = activeColorIndexes();
+    if (!activeColors.length) {
+      finished.value = true;
+      score.value += 500;
+      best.value = setBestScore("bubble-shooter", score.value);
+      status.value = "全清完成";
+      const result = recordGameResult("bubble-shooter", {
+        score: score.value,
+        moves: moves.value,
+        won: true,
+        completed: true,
+      });
+      runResult.value = {
+        title: "完美全清！",
+        detail: "所有泡泡已消除，获得 500 分奖励",
+        stats: [
+          { label: "得分", value: score.value },
+          { label: "步数", value: moves.value },
+        ],
+        ...result,
+      };
+      isShooting = false;
+      return;
+    }
+
+    if (board.value[rows - 1].some((value) => value !== null)) {
+      finished.value = true;
+      best.value = setBestScore("bubble-shooter", score.value);
+      status.value = "泡泡触底";
+      const result = recordGameResult("bubble-shooter", {
+        score: score.value,
+        moves: moves.value,
+        won: false,
+        completed: true,
+      });
+      runResult.value = {
+        title: "游戏结束",
+        detail: "泡泡触底",
+        stats: [
+          { label: "得分", value: score.value },
+          { label: "步数", value: moves.value },
+        ],
+        ...result,
+      };
+      isShooting = false;
+      return;
+    }
+
+    advanceQueue(activeColors);
+    isShooting = false;
+  });
 }
 
 restart();
@@ -341,10 +443,13 @@ onMounted(() => {
 
 onUnmounted(() => {
   if (aimFrame) cancelAnimationFrame(aimFrame);
+  if (animationFrame) cancelAnimationFrame(animationFrame);
   resizeObserver?.disconnect();
   window.removeEventListener("resize", invalidateAimBounds);
   isPointerDown = false;
   pointerDownCol = null;
+  flyingBubble.value = null;
+  isShooting = false;
 });
 </script>
 
@@ -364,6 +469,16 @@ onUnmounted(() => {
       <div class="board-shell bubble-board-shell">
         <div ref="stageRef" class="bubble-stage" @pointerdown="handlePointerDown" @pointermove="handlePointerMove" @pointerup="handlePointerUp" @pointercancel="handlePointerCancel">
           <span class="bubble-aim-line" aria-hidden="true"></span>
+
+          <!-- 飞行中的泡泡 -->
+          <div v-if="flyingBubble" class="flying-bubble" :style="{
+            '--bubble-color': colorValue(flyingBubble.color),
+            left: flyingBubble.x + 'px',
+            top: flyingBubble.y + 'px'
+          }">
+            <span></span>
+          </div>
+
           <div ref="gridRef" class="bubble-grid">
             <div v-for="(row, rowIndex) in board" :key="rowIndex" class="bubble-row" :class="{ odd: rowIndex % 2 }">
               <button
@@ -528,6 +643,45 @@ onUnmounted(() => {
   pointer-events: none;
   transform: translateX(-50%);
   will-change: left;
+}
+
+.flying-bubble {
+  position: absolute;
+  z-index: 10;
+  width: clamp(28px, 5vmin, 48px);
+  aspect-ratio: 1;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+  will-change: left, top;
+}
+
+.flying-bubble span {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  background:
+    radial-gradient(circle at 32% 24%, rgba(255, 255, 255, 0.84), transparent 20%),
+    var(--bubble-color);
+  box-shadow:
+    0 0 24px color-mix(in srgb, var(--bubble-color), transparent 20%),
+    0 0 36px color-mix(in srgb, var(--bubble-color), transparent 50%),
+    inset -8px -10px 16px rgba(0, 0, 0, 0.22);
+  animation: bubble-pulse 0.3s ease-out;
+}
+
+@keyframes bubble-pulse {
+  0% {
+    transform: scale(0.8);
+    opacity: 0.8;
+  }
+  50% {
+    transform: scale(1.1);
+  }
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
 }
 
 .launcher-line {
