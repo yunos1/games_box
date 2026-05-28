@@ -1,13 +1,23 @@
 <script setup>
-import { computed, ref } from "vue";
+import { onMounted, onUnmounted, ref } from "vue";
 import GameLayout from "../components/GameLayout.vue";
 import { getBestScore, setBestScore } from "../utils/storage";
+import { recordGameResult } from "../utils/progress";
 
 const rows = 11;
 const cols = 10;
 const colors = ["#53f3ff", "#ff4fd8", "#ffd166", "#7dff6f", "#a78bfa"];
+const neighborMap = Array.from({ length: rows }, (_, row) =>
+  Array.from({ length: cols }, (_, col) => {
+    const diagonal = row % 2 === 0 ? [[-1, -1], [1, -1]] : [[-1, 1], [1, 1]];
+    return [[-1, 0], [1, 0], [0, -1], [0, 1], ...diagonal]
+      .map(([dr, dc]) => [row + dr, col + dc])
+      .filter(([nextRow, nextCol]) => nextRow >= 0 && nextRow < rows && nextCol >= 0 && nextCol < cols);
+  }),
+);
 
 const board = ref([]);
+const stageRef = ref(null);
 const gridRef = ref(null);
 const current = ref(0);
 const next = ref(1);
@@ -16,10 +26,16 @@ const best = ref(getBestScore("bubble-shooter"));
 const moves = ref(0);
 const status = ref("点击任意列发射泡泡");
 const finished = ref(false);
-const aimCol = ref(Math.floor(cols / 2));
-const launcherX = ref(50);
+const runResult = ref(null);
 
-const remaining = computed(() => board.value.flat().filter((item) => item !== null).length);
+let aimCol = Math.floor(cols / 2);
+let launcherX = 50;
+let aimFrame = 0;
+let pendingClientX = null;
+let cachedGridRect = null;
+let resizeObserver = null;
+let isPointerDown = false;
+let pointerDownCol = null;
 
 function randomColor() {
   return Math.floor(Math.random() * colors.length);
@@ -53,29 +69,92 @@ function refreshBoard() {
   board.value = board.value.map((row) => [...row]);
 }
 
-function aimAtColumn(col) {
-  aimCol.value = clamp(col, 0, cols - 1);
-  launcherX.value = ((aimCol.value + 0.5) / cols) * 100;
+function applyLauncherPosition(percent) {
+  launcherX = clamp(percent, 4, 96);
+  stageRef.value?.style.setProperty("--launcher-x", `${launcherX}%`);
 }
 
-function updateAimFromPointer(event) {
-  const grid = gridRef.value;
-  if (!grid || typeof event.clientX !== "number") return aimCol.value;
-  const rect = grid.getBoundingClientRect();
-  const x = clamp(event.clientX - rect.left, 0, rect.width);
-  const percent = rect.width ? (x / rect.width) * 100 : 50;
-  const col = rect.width ? Math.floor((x / rect.width) * cols) : aimCol.value;
-  aimCol.value = clamp(col, 0, cols - 1);
-  launcherX.value = clamp(percent, 4, 96);
-  return aimCol.value;
+function aimAtColumn(col) {
+  aimCol = clamp(col, 0, cols - 1);
+  applyLauncherPosition(((aimCol + 0.5) / cols) * 100);
+  return aimCol;
+}
+
+function invalidateAimBounds() {
+  cachedGridRect = null;
+}
+
+function getAimBounds() {
+  if (!cachedGridRect) cachedGridRect = gridRef.value?.getBoundingClientRect() || null;
+  return cachedGridRect;
+}
+
+function applyAimFromClientX(clientX) {
+  const rect = getAimBounds();
+  if (!rect || typeof clientX !== "number") return aimCol;
+  const x = clamp(clientX - rect.left, 0, rect.width);
+  const percent = rect.width ? (x / rect.width) * 100 : launcherX;
+  aimCol = rect.width ? clamp(Math.floor((x / rect.width) * cols), 0, cols - 1) : aimCol;
+  applyLauncherPosition(percent);
+  return aimCol;
+}
+
+function flushAimFrame() {
+  aimFrame = 0;
+  const clientX = pendingClientX;
+  pendingClientX = null;
+  applyAimFromClientX(clientX);
+}
+
+function updateAimFromPointer(event, immediate = false) {
+  if (typeof event?.clientX !== "number") return aimCol;
+  if (immediate) {
+    if (aimFrame) cancelAnimationFrame(aimFrame);
+    aimFrame = 0;
+    pendingClientX = null;
+    return applyAimFromClientX(event.clientX);
+  }
+  pendingClientX = event.clientX;
+  if (!aimFrame) aimFrame = requestAnimationFrame(flushAimFrame);
+  return aimCol;
 }
 
 function moveLauncher(event) {
   updateAimFromPointer(event);
 }
 
+function handlePointerDown(event) {
+  if (finished.value) return;
+  isPointerDown = true;
+  const col = updateAimFromPointer(event, true);
+  pointerDownCol = col;
+}
+
+function handlePointerMove(event) {
+  if (!isPointerDown) {
+    updateAimFromPointer(event);
+    return;
+  }
+  updateAimFromPointer(event, true);
+}
+
+function handlePointerUp(event) {
+  if (!isPointerDown) return;
+  isPointerDown = false;
+  const col = updateAimFromPointer(event, true);
+  if (pointerDownCol !== null) {
+    shoot(col);
+  }
+  pointerDownCol = null;
+}
+
+function handlePointerCancel() {
+  isPointerDown = false;
+  pointerDownCol = null;
+}
+
 function shootFromColumn(col, event) {
-  if (event?.clientX) updateAimFromPointer(event);
+  if (typeof event?.clientX === "number") updateAimFromPointer(event, true);
   else aimAtColumn(col);
   shoot(col);
 }
@@ -90,30 +169,36 @@ function restart() {
   score.value = 0;
   moves.value = 0;
   finished.value = false;
+  runResult.value = null;
+  isPointerDown = false;
+  pointerDownCol = null;
   aimAtColumn(Math.floor(cols / 2));
   status.value = "点击任意列发射泡泡";
 }
 
 function getNeighbors(row, col) {
-  const diagonal = row % 2 === 0 ? [[-1, -1], [1, -1]] : [[-1, 1], [1, 1]];
-  return [[-1, 0], [1, 0], [0, -1], [0, 1], ...diagonal]
-    .map(([dr, dc]) => [row + dr, col + dc])
-    .filter(([r, c]) => r >= 0 && r < rows && c >= 0 && c < cols);
+  return neighborMap[row][col];
+}
+
+function cellKey(row, col) {
+  return row * cols + col;
 }
 
 function collectGroup(row, col, color) {
-  const stack = [[row, col]];
-  const seen = new Set([`${row},${col}`]);
+  const stack = [cellKey(row, col)];
+  const seen = new Set(stack);
   while (stack.length) {
-    const [r, c] = stack.pop();
+    const key = stack.pop();
+    const r = Math.floor(key / cols);
+    const c = key % cols;
     getNeighbors(r, c).forEach(([nr, nc]) => {
-      const key = `${nr},${nc}`;
-      if (seen.has(key) || board.value[nr][nc] !== color) return;
-      seen.add(key);
-      stack.push([nr, nc]);
+      const neighborKey = cellKey(nr, nc);
+      if (seen.has(neighborKey) || board.value[nr][nc] !== color) return;
+      seen.add(neighborKey);
+      stack.push(neighborKey);
     });
   }
-  return [...seen].map((key) => key.split(",").map(Number));
+  return [...seen].map((key) => [Math.floor(key / cols), key % cols]);
 }
 
 function dropFloating() {
@@ -121,23 +206,26 @@ function dropFloating() {
   const stack = [];
   board.value[0].forEach((value, col) => {
     if (value !== null) {
-      anchored.add(`0,${col}`);
-      stack.push([0, col]);
+      const key = cellKey(0, col);
+      anchored.add(key);
+      stack.push(key);
     }
   });
   while (stack.length) {
-    const [row, col] = stack.pop();
+    const key = stack.pop();
+    const row = Math.floor(key / cols);
+    const col = key % cols;
     getNeighbors(row, col).forEach(([nr, nc]) => {
-      const key = `${nr},${nc}`;
-      if (anchored.has(key) || board.value[nr][nc] === null) return;
-      anchored.add(key);
-      stack.push([nr, nc]);
+      const neighborKey = cellKey(nr, nc);
+      if (anchored.has(neighborKey) || board.value[nr][nc] === null) return;
+      anchored.add(neighborKey);
+      stack.push(neighborKey);
     });
   }
   let dropped = 0;
   for (let row = 0; row < rows; row += 1) {
     for (let col = 0; col < cols; col += 1) {
-      if (board.value[row][col] !== null && !anchored.has(`${row},${col}`)) {
+      if (board.value[row][col] !== null && !anchored.has(cellKey(row, col))) {
         board.value[row][col] = null;
         dropped += 1;
       }
@@ -155,6 +243,21 @@ function shoot(col) {
     status.value = "这一列已经触底";
     finished.value = true;
     best.value = setBestScore("bubble-shooter", score.value);
+    const result = recordGameResult("bubble-shooter", {
+      score: score.value,
+      moves: moves.value,
+      won: false,
+      completed: true,
+    });
+    runResult.value = {
+      title: "游戏结束",
+      detail: "这一列已经触底",
+      stats: [
+        { label: "得分", value: score.value },
+        { label: "步数", value: moves.value },
+      ],
+      ...result,
+    };
     return;
   }
 
@@ -182,6 +285,21 @@ function shoot(col) {
     score.value += 500;
     best.value = setBestScore("bubble-shooter", score.value);
     status.value = "全清完成";
+    const result = recordGameResult("bubble-shooter", {
+      score: score.value,
+      moves: moves.value,
+      won: true,
+      completed: true,
+    });
+    runResult.value = {
+      title: "完美全清！",
+      detail: "所有泡泡已消除，获得 500 分奖励",
+      stats: [
+        { label: "得分", value: score.value },
+        { label: "步数", value: moves.value },
+      ],
+      ...result,
+    };
     return;
   }
 
@@ -189,6 +307,21 @@ function shoot(col) {
     finished.value = true;
     best.value = setBestScore("bubble-shooter", score.value);
     status.value = "泡泡触底";
+    const result = recordGameResult("bubble-shooter", {
+      score: score.value,
+      moves: moves.value,
+      won: false,
+      completed: true,
+    });
+    runResult.value = {
+      title: "游戏结束",
+      detail: "泡泡触底",
+      stats: [
+        { label: "得分", value: score.value },
+        { label: "步数", value: moves.value },
+      ],
+      ...result,
+    };
     return;
   }
 
@@ -196,6 +329,23 @@ function shoot(col) {
 }
 
 restart();
+
+onMounted(() => {
+  aimAtColumn(aimCol);
+  if (typeof ResizeObserver !== "undefined" && gridRef.value) {
+    resizeObserver = new ResizeObserver(invalidateAimBounds);
+    resizeObserver.observe(gridRef.value);
+  }
+  window.addEventListener("resize", invalidateAimBounds, { passive: true });
+});
+
+onUnmounted(() => {
+  if (aimFrame) cancelAnimationFrame(aimFrame);
+  resizeObserver?.disconnect();
+  window.removeEventListener("resize", invalidateAimBounds);
+  isPointerDown = false;
+  pointerDownCol = null;
+});
 </script>
 
 <template>
@@ -206,11 +356,13 @@ restart();
     :best="best"
     :moves="moves"
     :status="status"
+    :run-result="runResult"
     @restart="restart"
+    @dismiss-result="runResult = null"
   >
     <section class="game-panel split-panel bubble-panel">
       <div class="board-shell bubble-board-shell">
-        <div class="bubble-stage" :style="{ '--launcher-x': `${launcherX}%` }" @pointermove="moveLauncher" @pointerdown="moveLauncher">
+        <div ref="stageRef" class="bubble-stage" @pointerdown="handlePointerDown" @pointermove="handlePointerMove" @pointerup="handlePointerUp" @pointercancel="handlePointerCancel">
           <span class="bubble-aim-line" aria-hidden="true"></span>
           <div ref="gridRef" class="bubble-grid">
             <div v-for="(row, rowIndex) in board" :key="rowIndex" class="bubble-row" :class="{ odd: rowIndex % 2 }">
@@ -269,6 +421,7 @@ restart();
   min-height: 0;
   overflow: hidden;
   padding: 8px;
+  contain: layout paint;
   touch-action: none;
 }
 
@@ -287,6 +440,7 @@ restart();
   background:
     radial-gradient(circle at 50% 0%, rgba(83, 243, 255, 0.12), transparent 44%),
     rgba(3, 8, 18, 0.86);
+  contain: layout paint;
 }
 
 .bubble-row {
@@ -356,7 +510,7 @@ restart();
   place-items: center;
   gap: 7px;
   transform: translateX(-50%);
-  transition: left 0.08s ease-out;
+  will-change: left;
 }
 
 .bubble-aim-line {
@@ -373,7 +527,7 @@ restart();
     0 0 28px rgba(83, 243, 255, 0.24);
   pointer-events: none;
   transform: translateX(-50%);
-  transition: left 0.08s ease-out;
+  will-change: left;
 }
 
 .launcher-line {
