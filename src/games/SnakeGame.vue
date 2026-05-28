@@ -514,10 +514,11 @@ function resize() {
   const parent = canvas.value.parentElement;
   if (!parent) return;
 
-  // 全屏模式下使用更大的尺寸
-  const maxWidth = isFullscreen.value ? parent.clientWidth - 8 : 820;
+  // 全屏模式下使用整个视口
+  const maxWidth = isFullscreen.value ? window.innerWidth : 820;
+  const maxHeight = isFullscreen.value ? window.innerHeight : parent.clientHeight - 4;
   const availableWidth = Math.max(280, Math.min(parent.clientWidth - 4, maxWidth));
-  const availableHeight = Math.max(280, parent.clientHeight - 4);
+  const availableHeight = Math.max(280, maxHeight);
   const cell = availableWidth / gridCols;
   gridRows = Math.max(12, Math.floor(availableHeight / cell));
   const width = Math.floor(gridCols * cell);
@@ -684,9 +685,10 @@ onUnmounted(() => {
   height: 100vh;
   z-index: 9999;
   background: #020611;
-  grid-template-columns: minmax(0, 1fr) 140px;
-  gap: 12px;
-  padding: 12px;
+  grid-template-columns: 1fr;
+  grid-template-rows: 1fr;
+  gap: 0;
+  padding: 0;
   margin: 0;
 }
 
@@ -726,7 +728,11 @@ onUnmounted(() => {
 }
 
 .is-fullscreen .snake-board-shell {
-  padding: 8px;
+  padding: 0;
+}
+
+.is-fullscreen .snake-side-panel {
+  display: none;
 }
 
 .snake-side-panel {
@@ -735,10 +741,6 @@ onUnmounted(() => {
   padding: 0;
   border: 0;
   background: transparent;
-}
-
-.is-fullscreen .snake-side-panel {
-  overflow-y: auto;
 }
 
 .snake-drawer {

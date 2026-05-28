@@ -233,9 +233,11 @@ function resize() {
   const target = canvas.value;
   if (!target) return;
   const parent = target.parentElement;
-  // 全屏模式下使用更大的尺寸
+  if (!parent) return;
+
+  // 全屏模式下使用整个视口，保持正方形
   const maxSize = isFullscreen.value
-    ? Math.min(parent.clientWidth - 16, parent.clientHeight - 16, 1400)
+    ? Math.min(window.innerWidth, window.innerHeight) - 16
     : Math.min(parent.clientWidth - 12, parent.clientHeight - 12);
   const displaySize = Math.max(260, maxSize);
   target.style.width = `${displaySize}px`;

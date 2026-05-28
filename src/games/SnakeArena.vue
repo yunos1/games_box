@@ -541,10 +541,13 @@ function loop(time) {
 }
 
 function resize() {
+  if (!canvas.value) return;
   const parent = canvas.value.parentElement;
-  // 全屏模式下使用更大的尺寸
+  if (!parent) return;
+
+  // 全屏模式下使用整个视口，保持正方形
   const maxSize = isFullscreen.value
-    ? Math.min(parent.clientWidth - 16, parent.clientHeight - 16, 1400)
+    ? Math.min(window.innerWidth, window.innerHeight) - 16
     : Math.min(parent.clientWidth - 8, parent.clientHeight - 8);
   const displaySize = Math.max(280, maxSize);
   canvas.value.style.width = `${displaySize}px`;
@@ -729,10 +732,15 @@ onUnmounted(() => {
 .arena-board-shell {
   position: relative;
   padding: 4px;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .is-fullscreen .arena-board-shell {
-  padding: 8px;
+  padding: 0;
 }
 
 .arena-canvas {
