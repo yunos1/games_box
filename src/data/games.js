@@ -151,6 +151,7 @@ export const games = [
     icon: tankBattleIcon,
     accent: "#eab308",
     description: "穿过障碍，击毁敌方坦克。",
+    hidden: true,
   },
   {
     id: "bomberman",
@@ -162,6 +163,7 @@ export const games = [
     icon: bombermanIcon,
     accent: "#fb7185",
     description: "放置炸弹，清掉敌人和箱子。",
+    hidden: true,
   },
   {
     id: "sudoku",
@@ -229,6 +231,7 @@ export const games = [
     icon: dungeonRogueIcon,
     accent: "#c084fc",
     description: "探索房间，拾取能量，击败守卫。",
+    hidden: true,
   },
   {
     id: "rhythm-game",

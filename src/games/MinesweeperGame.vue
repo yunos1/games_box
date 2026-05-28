@@ -4,9 +4,9 @@ import GameLayout from "../components/GameLayout.vue";
 import { getBestScore, setBestScore } from "../utils/storage";
 
 const levels = {
-  easy: { label: "初级", rows: 9, cols: 9, mines: 10 },
-  normal: { label: "中级", rows: 12, cols: 12, mines: 24 },
-  hard: { label: "高级", rows: 14, cols: 16, mines: 40 },
+  easy: { label: "初级", rows: 20, cols: 9, mines: 22 },
+  normal: { label: "中级", rows: 22, cols: 10, mines: 36 },
+  hard: { label: "高级", rows: 24, cols: 12, mines: 52 },
 };
 
 const level = ref("easy");
@@ -220,7 +220,7 @@ restart();
     :status="status"
     @restart="restart"
   >
-    <section class="game-panel split-panel">
+    <section class="game-panel split-panel mines-panel">
       <div class="board-shell mines-area">
         <div
           class="mine-board"
@@ -249,7 +249,7 @@ restart();
           </button>
         </div>
       </div>
-      <aside class="control-panel">
+      <aside class="control-panel mines-controls">
         <h2>难度</h2>
         <div class="segmented">
           <button
@@ -340,7 +340,7 @@ restart();
   }
 
   .mine-board {
-    width: 100%;
+    width: min(100cqw, calc(100cqh * var(--board-ratio)));
     gap: 3px;
   }
 
@@ -348,6 +348,14 @@ restart();
     min-width: 0;
     border-radius: 4px;
     font-size: 0.82rem;
+  }
+
+  .mines-panel {
+    grid-template-rows: minmax(0, 1fr) auto;
+  }
+
+  .mines-controls {
+    max-height: none;
   }
 }
 </style>
