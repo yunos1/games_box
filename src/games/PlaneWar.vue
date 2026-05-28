@@ -54,6 +54,12 @@ let particles = [];
 let stars = [];
 let shieldHitFrame = 0;
 
+// 性能优化：离屏Canvas缓存
+let planeCache = new Map();
+let bgCanvas;
+let bgCtx;
+let lastBgUpdate = 0;
+
 const fighterSkins = [
   { hull: "#53f3ff", wing: "#1d4ed8", cockpit: "#ecfeff", trim: "#ff4fd8", flame: "#ffd166", glow: "#53f3ff" },
   { hull: "#f97316", wing: "#7c2d12", cockpit: "#ffedd5", trim: "#facc15", flame: "#fb7185", glow: "#fdba74" },
@@ -73,32 +79,179 @@ const fighterSkins = [
   { hull: "#2dd4bf", wing: "#042f2e", cockpit: "#f0fdfa", trim: "#818cf8", flame: "#f472b6", glow: "#5eead4" },
 ];
 
+// 初始化离屏Canvas用于背景缓存
+function initBackgroundCache() {
+  bgCanvas = document.createElement("canvas");
+  bgCanvas.width = width;
+  bgCanvas.height = height;
+  bgCtx = bgCanvas.getContext("2d");
+}
+
 function initStars() {
   stars = [];
-  for (let i = 0; i < 120; i += 1) {
+  for (let i = 0; i < 150; i += 1) {
     stars.push({
       x: Math.random() * width,
       y: Math.random() * height,
       size: Math.random() * 2.5 + 0.5,
-      speed: Math.random() * 1.2 + 0.3,
-      opacity: Math.random() * 0.6 + 0.4,
+      speed: Math.random() * 1.5 + 0.4,
+      opacity: Math.random() * 0.7 + 0.3,
+      twinkle: Math.random() * Math.PI * 2, // 闪烁相位
     });
   }
 }
 
+// 缓存飞机渲染
+function getCachedPlane(skinIndex, scale, isEnemy) {
+  const key = `${skinIndex}-${scale.toFixed(2)}-${isEnemy}`;
+  if (planeCache.has(key)) return planeCache.get(key);
+
+  const cacheCanvas = document.createElement("canvas");
+  const size = 150;
+  cacheCanvas.width = size;
+  cacheCanvas.height = size;
+  const cacheCtx = cacheCanvas.getContext("2d");
+
+  // 渲染飞机到缓存Canvas
+  const skin = fighterSkins[skinIndex % fighterSkins.length];
+  const direction = isEnemy ? -1 : 1;
+
+  cacheCtx.save();
+  cacheCtx.translate(size / 2, size / 2);
+  cacheCtx.scale(scale, scale * direction);
+
+  // 外层光晕
+  cacheCtx.shadowColor = skin.glow;
+  cacheCtx.shadowBlur = isEnemy ? 18 : 28;
+
+  // 机翼
+  const wingGradient = cacheCtx.createLinearGradient(-34, 15, 34, 15);
+  wingGradient.addColorStop(0, skin.wing);
+  wingGradient.addColorStop(0.5, skin.hull);
+  wingGradient.addColorStop(1, skin.wing);
+  cacheCtx.fillStyle = wingGradient;
+  cacheCtx.beginPath();
+  cacheCtx.moveTo(0, -30);
+  cacheCtx.lineTo(34, 15);
+  cacheCtx.lineTo(14, 8);
+  cacheCtx.lineTo(8, 30);
+  cacheCtx.lineTo(0, 22);
+  cacheCtx.lineTo(-8, 30);
+  cacheCtx.lineTo(-14, 8);
+  cacheCtx.lineTo(-34, 15);
+  cacheCtx.closePath();
+  cacheCtx.fill();
+
+  cacheCtx.strokeStyle = `rgba(255, 255, 255, 0.15)`;
+  cacheCtx.lineWidth = 1;
+  cacheCtx.stroke();
+
+  // 机身
+  const hullGradient = cacheCtx.createLinearGradient(-8, -36, 8, 37);
+  hullGradient.addColorStop(0, skin.hull);
+  hullGradient.addColorStop(0.3, skin.glow);
+  hullGradient.addColorStop(0.7, skin.hull);
+  hullGradient.addColorStop(1, skin.wing);
+  cacheCtx.fillStyle = hullGradient;
+  cacheCtx.beginPath();
+  cacheCtx.moveTo(0, -36);
+  cacheCtx.bezierCurveTo(13, -18, 12, 12, 5, 31);
+  cacheCtx.lineTo(0, 37);
+  cacheCtx.lineTo(-5, 31);
+  cacheCtx.bezierCurveTo(-12, 12, -13, -18, 0, -36);
+  cacheCtx.closePath();
+  cacheCtx.fill();
+
+  // 机身高光
+  cacheCtx.save();
+  cacheCtx.globalAlpha = 0.4;
+  const highlightGradient = cacheCtx.createLinearGradient(-3, -30, 3, 10);
+  highlightGradient.addColorStop(0, "#ffffff");
+  highlightGradient.addColorStop(1, "transparent");
+  cacheCtx.fillStyle = highlightGradient;
+  cacheCtx.beginPath();
+  cacheCtx.ellipse(0, -10, 4, 20, 0, 0, Math.PI * 2);
+  cacheCtx.fill();
+  cacheCtx.restore();
+
+  // 驾驶舱
+  const cockpitGradient = cacheCtx.createRadialGradient(-2, -15, 0, 0, -13, 8);
+  cockpitGradient.addColorStop(0, "#ffffff");
+  cockpitGradient.addColorStop(0.4, skin.cockpit);
+  cockpitGradient.addColorStop(1, skin.hull);
+  cacheCtx.fillStyle = cockpitGradient;
+  cacheCtx.beginPath();
+  cacheCtx.ellipse(0, -13, 6, 12, 0, 0, Math.PI * 2);
+  cacheCtx.fill();
+
+  // 装饰条纹
+  cacheCtx.fillStyle = skin.trim;
+  cacheCtx.fillRect(-3, 1, 6, 22);
+
+  // 侧翼装饰
+  cacheCtx.beginPath();
+  cacheCtx.moveTo(-18, 18);
+  cacheCtx.lineTo(-29, 31);
+  cacheCtx.lineTo(-10, 25);
+  cacheCtx.closePath();
+  cacheCtx.fill();
+  cacheCtx.beginPath();
+  cacheCtx.moveTo(18, 18);
+  cacheCtx.lineTo(29, 31);
+  cacheCtx.lineTo(10, 25);
+  cacheCtx.closePath();
+  cacheCtx.fill();
+
+  cacheCtx.restore();
+
+  planeCache.set(key, cacheCanvas);
+  return cacheCanvas;
+}
+
+// 增强的爆炸效果
 function spawnExplosion(x, y, color, count = 20) {
   for (let i = 0; i < count; i += 1) {
     const angle = (Math.PI * 2 * i) / count + Math.random() * 0.3;
-    const speed = Math.random() * 3 + 2;
+    const speed = Math.random() * 4 + 2.5;
     particles.push({
       x,
       y,
       vx: Math.cos(angle) * speed,
       vy: Math.sin(angle) * speed,
       life: 1,
-      decay: 0.015 + Math.random() * 0.01,
-      size: Math.random() * 4 + 2,
+      decay: 0.012 + Math.random() * 0.008,
+      size: Math.random() * 5 + 2,
       color,
+      type: "explosion",
+    });
+  }
+  // 添加冲击波效果
+  particles.push({
+    x,
+    y,
+    vx: 0,
+    vy: 0,
+    life: 1,
+    decay: 0.05,
+    size: 5,
+    color,
+    type: "shockwave",
+  });
+}
+
+// 添加引擎尾迹粒子
+function spawnTrail(x, y, color) {
+  if (frame % 2 === 0) {
+    particles.push({
+      x: x + (Math.random() - 0.5) * 4,
+      y: y + (Math.random() - 0.5) * 4,
+      vx: (Math.random() - 0.5) * 0.5,
+      vy: Math.random() * 1 + 0.5,
+      life: 1,
+      decay: 0.03,
+      size: Math.random() * 2.5 + 1,
+      color,
+      type: "trail",
     });
   }
 }
@@ -147,6 +300,7 @@ function restart() {
   magnetFrames = 0;
   droneFrames = 0;
   shieldHitFrame = 0;
+  lastBgUpdate = 0;
   shieldCharges.value = 9;
   bombCharges.value = 9;
   focusCharges.value = 9;
@@ -169,6 +323,7 @@ function restart() {
         ? "穿透弹幕：主武器伤害提高"
         : "穿梭弹幕";
   initStars();
+  initBackgroundCache();
   draw();
 }
 
@@ -260,21 +415,42 @@ function update() {
   if (droneFrames > 0) droneFrames -= 1;
   if (shieldHitFrame > 0) shieldHitFrame -= 1;
 
+  // 更新星空（带闪烁效果）
   stars.forEach((star) => {
     star.y += star.speed;
+    star.twinkle += 0.05;
     if (star.y > height) {
       star.y = -10;
       star.x = Math.random() * width;
     }
   });
 
+  // 更新粒子（优化物理效果）
   particles.forEach((particle) => {
     particle.x += particle.vx;
     particle.y += particle.vy;
-    particle.vy += 0.08;
+    if (particle.type === "explosion" || particle.type === "trail") {
+      particle.vy += 0.08; // 重力
+      particle.vx *= 0.98; // 空气阻力
+    }
+    if (particle.type === "shockwave") {
+      particle.size += 3; // 冲击波扩散
+    }
     particle.life -= particle.decay;
   });
   particles = particles.filter((p) => p.life > 0);
+
+  // 为玩家飞机添加尾迹
+  const playerSkin = fighterSkins[player.skin % fighterSkins.length];
+  spawnTrail(player.x, player.y + 30, playerSkin.flame);
+
+  // 为敌机添加尾迹
+  enemies.forEach((enemy) => {
+    if (enemy.hp > 1) {
+      const enemySkin = fighterSkins[enemy.skin % fighterSkins.length];
+      spawnTrail(enemy.x, enemy.y - 30, enemySkin.flame);
+    }
+  });
 
   if (frame % (variantEffect === "elite-rush" ? 30 : 44) === 0) spawnEnemy();
   const playerSpeed = focusFrames > 0 ? 7.4 : 6;
@@ -328,7 +504,7 @@ function update() {
         score.value += variantEffect === "elite-rush" ? 30 : 20;
         best.value = setBestScore("plane-war", score.value);
         syncProgress();
-        spawnExplosion(enemy.x, enemy.y, fighterSkins[enemy.skin % fighterSkins.length].glow, 25);
+        spawnExplosion(enemy.x, enemy.y, fighterSkins[enemy.skin % fighterSkins.length].glow, 30);
       }
     });
   });
@@ -343,7 +519,7 @@ function update() {
         score.value += variantEffect === "elite-rush" ? 30 : 20;
         best.value = setBestScore("plane-war", score.value);
         syncProgress();
-        spawnExplosion(enemy.x, enemy.y, fighterSkins[enemy.skin % fighterSkins.length].glow, 25);
+        spawnExplosion(enemy.x, enemy.y, fighterSkins[enemy.skin % fighterSkins.length].glow, 30);
       }
     });
     enemies = enemies.filter((enemy) => enemy.hp > 0 && enemy.y < height + 60);
@@ -354,7 +530,7 @@ function update() {
   if (hitEnemy || hitBullet) {
     if (hitEnemy) {
       hitEnemy.hp = 0;
-      spawnExplosion(hitEnemy.x, hitEnemy.y, fighterSkins[hitEnemy.skin % fighterSkins.length].glow, 25);
+      spawnExplosion(hitEnemy.x, hitEnemy.y, fighterSkins[hitEnemy.skin % fighterSkins.length].glow, 30);
     }
     if (hitBullet) hitBullet.y = height + 100;
     hitsTaken += 1;
@@ -365,107 +541,30 @@ function update() {
       finished = true;
       status.value = "战机坠毁，点击重开";
       best.value = setBestScore("plane-war", score.value);
-      spawnExplosion(player.x, player.y, fighterSkins[player.skin % fighterSkins.length].glow, 40);
+      spawnExplosion(player.x, player.y, fighterSkins[player.skin % fighterSkins.length].glow, 50);
       showRunResult("战机坠毁", `本局受击 ${hitsTaken} 次，已保留击落与星级进度。`);
     }
   }
 }
 
+// 使用缓存绘制飞机（性能优化）
 function drawPlane(x, y, options = {}) {
   const { enemy = false, skinIndex = 0, scale = 1, elite = false } = options;
   const skin = fighterSkins[skinIndex % fighterSkins.length];
-  const direction = enemy ? -1 : 1;
   const pulse = 0.75 + Math.sin(frame / 9 + skinIndex) * 0.25;
 
   ctx.save();
+
+  // 绘制缓存的飞机主体
+  const cachedPlane = getCachedPlane(skinIndex, scale, enemy);
   ctx.translate(x, y);
-  ctx.scale(scale, scale * direction);
+  ctx.drawImage(cachedPlane, -cachedPlane.width / 2, -cachedPlane.height / 2);
 
-  // 外层光晕
-  ctx.shadowColor = skin.glow;
-  ctx.shadowBlur = enemy ? 18 : 28;
-
-  // 机翼（带渐变）
-  const wingGradient = ctx.createLinearGradient(-34, 15, 34, 15);
-  wingGradient.addColorStop(0, skin.wing);
-  wingGradient.addColorStop(0.5, skin.hull);
-  wingGradient.addColorStop(1, skin.wing);
-  ctx.fillStyle = wingGradient;
-  ctx.beginPath();
-  ctx.moveTo(0, -30);
-  ctx.lineTo(34, 15);
-  ctx.lineTo(14, 8);
-  ctx.lineTo(8, 30);
-  ctx.lineTo(0, 22);
-  ctx.lineTo(-8, 30);
-  ctx.lineTo(-14, 8);
-  ctx.lineTo(-34, 15);
-  ctx.closePath();
-  ctx.fill();
-
-  // 机翼边缘高光
-  ctx.strokeStyle = `rgba(255, 255, 255, 0.15)`;
-  ctx.lineWidth = 1;
-  ctx.stroke();
-
-  // 机身（带金属质感渐变）
-  const hullGradient = ctx.createLinearGradient(-8, -36, 8, 37);
-  hullGradient.addColorStop(0, skin.hull);
-  hullGradient.addColorStop(0.3, skin.glow);
-  hullGradient.addColorStop(0.7, skin.hull);
-  hullGradient.addColorStop(1, skin.wing);
-  ctx.fillStyle = hullGradient;
-  ctx.beginPath();
-  ctx.moveTo(0, -36);
-  ctx.bezierCurveTo(13, -18, 12, 12, 5, 31);
-  ctx.lineTo(0, 37);
-  ctx.lineTo(-5, 31);
-  ctx.bezierCurveTo(-12, 12, -13, -18, 0, -36);
-  ctx.closePath();
-  ctx.fill();
-
-  // 机身高光
-  ctx.save();
-  ctx.globalAlpha = 0.4;
-  const highlightGradient = ctx.createLinearGradient(-3, -30, 3, 10);
-  highlightGradient.addColorStop(0, "#ffffff");
-  highlightGradient.addColorStop(1, "transparent");
-  ctx.fillStyle = highlightGradient;
-  ctx.beginPath();
-  ctx.ellipse(0, -10, 4, 20, 0, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.restore();
-
-  // 驾驶舱（带玻璃反光）
-  const cockpitGradient = ctx.createRadialGradient(-2, -15, 0, 0, -13, 8);
-  cockpitGradient.addColorStop(0, "#ffffff");
-  cockpitGradient.addColorStop(0.4, skin.cockpit);
-  cockpitGradient.addColorStop(1, skin.hull);
-  ctx.fillStyle = cockpitGradient;
-  ctx.beginPath();
-  ctx.ellipse(0, -13, 6, 12, 0, 0, Math.PI * 2);
-  ctx.fill();
-
-  // 装饰条纹
-  ctx.fillStyle = skin.trim;
-  ctx.fillRect(-3, 1, 6, 22);
-
-  // 侧翼装饰
-  ctx.beginPath();
-  ctx.moveTo(-18, 18);
-  ctx.lineTo(-29, 31);
-  ctx.lineTo(-10, 25);
-  ctx.closePath();
-  ctx.fill();
-  ctx.beginPath();
-  ctx.moveTo(18, 18);
-  ctx.lineTo(29, 31);
-  ctx.lineTo(10, 25);
-  ctx.closePath();
-  ctx.fill();
-
-  // 引擎尾焰
+  // 动态绘制引擎尾焰（不缓存，因为有动画）
   if (!enemy || elite) {
+    const direction = enemy ? -1 : 1;
+    ctx.scale(scale, scale * direction);
+
     ctx.shadowBlur = 12 + pulse * 15;
     ctx.shadowColor = skin.flame;
 
@@ -520,7 +619,7 @@ function drawEnemyHealth(enemy) {
 function draw() {
   ctx.clearRect(0, 0, width, height);
 
-  // 背景渐变
+  // 背景渐变（深空效果）
   const bgGradient = ctx.createLinearGradient(0, 0, 0, height);
   bgGradient.addColorStop(0, "#0a0e1a");
   bgGradient.addColorStop(0.5, "#020611");
@@ -528,10 +627,12 @@ function draw() {
   ctx.fillStyle = bgGradient;
   ctx.fillRect(0, 0, width, height);
 
-  // 星云效果
+  // 动态星云效果
   ctx.save();
-  ctx.globalAlpha = 0.15;
-  const nebulaGradient = ctx.createRadialGradient(width * 0.3, height * 0.4, 0, width * 0.3, height * 0.4, width * 0.6);
+  ctx.globalAlpha = 0.18;
+  const nebulaX = width * 0.3 + Math.sin(frame / 200) * 50;
+  const nebulaY = height * 0.4 + Math.cos(frame / 150) * 30;
+  const nebulaGradient = ctx.createRadialGradient(nebulaX, nebulaY, 0, nebulaX, nebulaY, width * 0.6);
   nebulaGradient.addColorStop(0, "#4c1d95");
   nebulaGradient.addColorStop(0.5, "#1e3a8a");
   nebulaGradient.addColorStop(1, "transparent");
@@ -539,12 +640,13 @@ function draw() {
   ctx.fillRect(0, 0, width, height);
   ctx.restore();
 
-  // 星空
+  // 星空（带闪烁）
   ctx.save();
   stars.forEach((star) => {
-    ctx.globalAlpha = star.opacity;
+    const twinkleAlpha = star.opacity * (0.7 + Math.sin(star.twinkle) * 0.3);
+    ctx.globalAlpha = twinkleAlpha;
     ctx.fillStyle = "#ffffff";
-    ctx.shadowBlur = star.size * 2;
+    ctx.shadowBlur = star.size * 2.5;
     ctx.shadowColor = "#67e8f9";
     ctx.beginPath();
     ctx.arc(star.x, star.y, star.size, 0, Math.PI * 2);
@@ -552,51 +654,81 @@ function draw() {
   });
   ctx.restore();
 
-  // 粒子效果
+  // 粒子效果（分类渲染）
   ctx.save();
   particles.forEach((particle) => {
     ctx.globalAlpha = particle.life;
-    ctx.shadowBlur = 8;
-    ctx.shadowColor = particle.color;
-    ctx.fillStyle = particle.color;
+
+    if (particle.type === "shockwave") {
+      // 冲击波环形效果
+      ctx.strokeStyle = particle.color;
+      ctx.lineWidth = 3;
+      ctx.shadowBlur = 15;
+      ctx.shadowColor = particle.color;
+      ctx.beginPath();
+      ctx.arc(particle.x, particle.y, particle.size, 0, Math.PI * 2);
+      ctx.stroke();
+    } else {
+      // 普通粒子
+      ctx.shadowBlur = 10;
+      ctx.shadowColor = particle.color;
+      ctx.fillStyle = particle.color;
+      ctx.beginPath();
+      ctx.arc(particle.x, particle.y, particle.size, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  });
+  ctx.restore();
+
+  // 玩家子弹（增强拖尾效果）
+  ctx.save();
+  bullets.forEach((bullet) => {
+    // 拖尾渐变
+    const gradient = ctx.createLinearGradient(bullet.x, bullet.y - 18, bullet.x, bullet.y + 6);
+    gradient.addColorStop(0, "#ffd166");
+    gradient.addColorStop(0.4, "#fbbf24");
+    gradient.addColorStop(1, "rgba(255, 209, 102, 0)");
+    ctx.shadowBlur = 20;
+    ctx.shadowColor = "#ffd166";
+    ctx.fillStyle = gradient;
+    ctx.fillRect(bullet.x - 3, bullet.y - 20, 6, 26);
+
+    // 子弹核心（更亮）
+    ctx.shadowBlur = 12;
+    ctx.fillStyle = "#fff";
+    ctx.fillRect(bullet.x - 1.5, bullet.y - 10, 3, 12);
+
+    // 子弹头部光点
     ctx.beginPath();
-    ctx.arc(particle.x, particle.y, particle.size, 0, Math.PI * 2);
+    ctx.arc(bullet.x, bullet.y - 12, 2, 0, Math.PI * 2);
     ctx.fill();
   });
   ctx.restore();
 
-  // 玩家子弹（带拖尾）
-  ctx.save();
-  bullets.forEach((bullet) => {
-    const gradient = ctx.createLinearGradient(bullet.x, bullet.y - 12, bullet.x, bullet.y + 4);
-    gradient.addColorStop(0, "#ffd166");
-    gradient.addColorStop(0.5, "#fbbf24");
-    gradient.addColorStop(1, "rgba(255, 209, 102, 0)");
-    ctx.shadowBlur = 16;
-    ctx.shadowColor = "#ffd166";
-    ctx.fillStyle = gradient;
-    ctx.fillRect(bullet.x - 2.5, bullet.y - 16, 5, 20);
-
-    // 子弹核心
-    ctx.shadowBlur = 8;
-    ctx.fillStyle = "#fff";
-    ctx.fillRect(bullet.x - 1.5, bullet.y - 8, 3, 10);
-  });
-  ctx.restore();
-
-  // 敌机子弹（带光晕）
+  // 敌机子弹（增强光晕）
   ctx.save();
   enemyBullets.forEach((bullet) => {
-    ctx.shadowBlur = 18;
+    // 外层光晕
+    ctx.shadowBlur = 25;
     ctx.shadowColor = "#ff5c7c";
-
-    const gradient = ctx.createRadialGradient(bullet.x, bullet.y, 0, bullet.x, bullet.y, 6);
-    gradient.addColorStop(0, "#fff");
-    gradient.addColorStop(0.3, "#ff5c7c");
-    gradient.addColorStop(1, "rgba(255, 92, 124, 0.3)");
-    ctx.fillStyle = gradient;
+    const outerGradient = ctx.createRadialGradient(bullet.x, bullet.y, 0, bullet.x, bullet.y, 10);
+    outerGradient.addColorStop(0, "#fff");
+    outerGradient.addColorStop(0.2, "#ff5c7c");
+    outerGradient.addColorStop(1, "rgba(255, 92, 124, 0)");
+    ctx.fillStyle = outerGradient;
     ctx.beginPath();
-    ctx.arc(bullet.x, bullet.y, 6, 0, Math.PI * 2);
+    ctx.arc(bullet.x, bullet.y, 10, 0, Math.PI * 2);
+    ctx.fill();
+
+    // 核心
+    ctx.shadowBlur = 15;
+    const coreGradient = ctx.createRadialGradient(bullet.x, bullet.y, 0, bullet.x, bullet.y, 5);
+    coreGradient.addColorStop(0, "#ffffff");
+    coreGradient.addColorStop(0.5, "#ff5c7c");
+    coreGradient.addColorStop(1, "rgba(255, 92, 124, 0.5)");
+    ctx.fillStyle = coreGradient;
+    ctx.beginPath();
+    ctx.arc(bullet.x, bullet.y, 5, 0, Math.PI * 2);
     ctx.fill();
   });
   ctx.restore();
@@ -612,26 +744,34 @@ function draw() {
     drawEnemyHealth(enemy);
   });
 
-  // 激光束
+  // 激光束（增强效果）
   if (laserFrames > 0) {
     const skin = fighterSkins[player.skin % fighterSkins.length];
+    const laserPulse = 0.8 + Math.sin(frame / 5) * 0.2;
+
     ctx.save();
 
-    // 外层光晕
-    ctx.shadowBlur = 35;
+    // 最外层光晕
+    ctx.shadowBlur = 45;
     ctx.shadowColor = skin.glow;
     ctx.strokeStyle = skin.glow;
-    ctx.globalAlpha = 0.3;
-    ctx.lineWidth = 18;
+    ctx.globalAlpha = 0.25 * laserPulse;
+    ctx.lineWidth = 24;
     ctx.beginPath();
     ctx.moveTo(player.x, player.y - 24);
     ctx.lineTo(player.x, 0);
     ctx.stroke();
 
     // 中层
-    ctx.globalAlpha = 0.6;
+    ctx.globalAlpha = 0.5 * laserPulse;
     ctx.strokeStyle = skin.trim;
-    ctx.lineWidth = 10;
+    ctx.lineWidth = 14;
+    ctx.stroke();
+
+    // 内层
+    ctx.globalAlpha = 0.8;
+    ctx.strokeStyle = skin.glow;
+    ctx.lineWidth = 8;
     ctx.stroke();
 
     // 核心
@@ -640,6 +780,23 @@ function draw() {
     ctx.lineWidth = 3;
     ctx.stroke();
 
+    // 激光粒子效果
+    if (frame % 3 === 0) {
+      for (let i = 0; i < 3; i++) {
+        particles.push({
+          x: player.x + (Math.random() - 0.5) * 10,
+          y: Math.random() * (player.y - 24),
+          vx: (Math.random() - 0.5) * 2,
+          vy: -Math.random() * 2,
+          life: 1,
+          decay: 0.05,
+          size: Math.random() * 2 + 1,
+          color: skin.glow,
+          type: "laser",
+        });
+      }
+    }
+
     ctx.restore();
   }
 
@@ -647,33 +804,61 @@ function draw() {
   if (!finished || player.lives > 0) {
     drawPlane(player.x, player.y, { skinIndex: player.skin, scale: playerPlaneScale });
 
-    // 护盾受击效果
+    // 护盾受击效果（增强）
     if (shieldHitFrame > 0) {
       const skin = fighterSkins[player.skin % fighterSkins.length];
+      const shieldAlpha = shieldHitFrame / 30;
+      const shieldRadius = player.r + 10 + (30 - shieldHitFrame) * 1.2;
+
       ctx.save();
-      ctx.globalAlpha = shieldHitFrame / 30;
+
+      // 外层冲击波
+      ctx.globalAlpha = shieldAlpha * 0.5;
       ctx.strokeStyle = skin.glow;
-      ctx.lineWidth = 3;
-      ctx.shadowBlur = 20;
+      ctx.lineWidth = 5;
+      ctx.shadowBlur = 25;
       ctx.shadowColor = skin.glow;
       ctx.beginPath();
-      ctx.arc(player.x, player.y, player.r + 10 + (30 - shieldHitFrame) * 0.8, 0, Math.PI * 2);
+      ctx.arc(player.x, player.y, shieldRadius, 0, Math.PI * 2);
       ctx.stroke();
+
+      // 内层护盾
+      ctx.globalAlpha = shieldAlpha;
+      ctx.lineWidth = 3;
+      ctx.shadowBlur = 15;
+      ctx.beginPath();
+      ctx.arc(player.x, player.y, player.r + 8, 0, Math.PI * 2);
+      ctx.stroke();
+
       ctx.restore();
     }
   }
 
-  // UI文字
+  // UI文字（优化样式）
   ctx.save();
-  ctx.shadowBlur = 0;
+  ctx.shadowBlur = 8;
+  ctx.shadowColor = "#53f3ff";
   ctx.fillStyle = "#ecfeff";
   ctx.font = "700 18px sans-serif";
   ctx.fillText(`SHIELD ${player.lives}`, 20, 30);
-  if (focusFrames > 0) ctx.fillText("FOCUS", width - 92, 30);
-  if (burstFrames > 0) ctx.fillText("BURST", width - 188, 30);
-  if (laserFrames > 0) ctx.fillText("LASER", width - 286, 30);
+
+  let statusX = width - 100;
+  if (focusFrames > 0) {
+    ctx.fillText("FOCUS", statusX, 30);
+    statusX -= 100;
+  }
+  if (burstFrames > 0) {
+    ctx.fillText("BURST", statusX, 30);
+    statusX -= 100;
+  }
+  if (laserFrames > 0) {
+    ctx.fillText("LASER", statusX, 30);
+  }
+
   if (slowFrames > 0) ctx.fillText("SLOW", 20, 56);
-  if (droneFrames > 0) ctx.fillText("DRONE", 102, 56);
+  if (magnetFrames > 0) ctx.fillText("MAGNET", 102, 56);
+  if (droneFrames > 0) ctx.fillText("DRONE", 210, 56);
+
   ctx.restore();
 }
 
@@ -693,8 +878,16 @@ function useBomb() {
 
   // 为每个敌机生成爆炸效果
   enemies.forEach((enemy) => {
-    spawnExplosion(enemy.x, enemy.y, fighterSkins[enemy.skin % fighterSkins.length].glow, 20);
+    spawnExplosion(enemy.x, enemy.y, fighterSkins[enemy.skin % fighterSkins.length].glow, 25);
   });
+
+  // 为每个子弹生成小爆炸
+  enemyBullets.forEach((bullet) => {
+    spawnExplosion(bullet.x, bullet.y, "#ff5c7c", 8);
+  });
+
+  // 中心冲击波
+  spawnExplosion(player.x, player.y - 50, "#53f3ff", 40);
 
   enemies = [];
   enemyBullets = [];
@@ -765,10 +958,22 @@ function useDrone() {
   status.value = "\u50da\u673a\u4e0a\u7ebf";
 }
 
-function loop() {
+// 优化的游戏循环（帧率控制）
+let lastFrameTime = 0;
+const targetFPS = 60;
+const frameInterval = 1000 / targetFPS;
+
+function loop(timestamp) {
+  loopId = requestAnimationFrame(loop);
+
+  // 帧率控制
+  const elapsed = timestamp - lastFrameTime;
+  if (elapsed < frameInterval) return;
+
+  lastFrameTime = timestamp - (elapsed % frameInterval);
+
   update();
   draw();
-  loopId = requestAnimationFrame(loop);
 }
 
 function resize() {
@@ -781,6 +986,13 @@ function resize() {
   canvas.value.height = height;
   canvas.value.style.width = "100%";
   canvas.value.style.height = "100%";
+
+  // 清理缓存，因为尺寸变化
+  planeCache.clear();
+  if (bgCanvas) {
+    bgCanvas.width = width;
+    bgCanvas.height = height;
+  }
 
   if (!player) return;
   const xScale = width / previousWidth;
@@ -814,9 +1026,10 @@ function onKeyUp(event) {
 }
 
 onMounted(() => {
-  ctx = canvas.value.getContext("2d");
+  ctx = canvas.value.getContext("2d", { alpha: false }); // 性能优化：禁用alpha通道
   canvas.value.width = width;
   canvas.value.height = height;
+  initBackgroundCache();
   restart();
   resize();
   window.addEventListener("resize", resize);
@@ -830,6 +1043,10 @@ onUnmounted(() => {
   window.removeEventListener("resize", resize);
   window.removeEventListener("keydown", onKeyDown);
   window.removeEventListener("keyup", onKeyUp);
+  // 清理缓存
+  planeCache.clear();
+  bgCanvas = null;
+  bgCtx = null;
 });
 </script>
 
