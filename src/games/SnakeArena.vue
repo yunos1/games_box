@@ -1,6 +1,6 @@
 <script setup>
 import { computed, onMounted, onUnmounted, ref } from "vue";
-import { ChevronDown, Settings } from "lucide-vue-next";
+import { ChevronDown, Settings, Maximize, Minimize } from "lucide-vue-next";
 import GameLayout from "../components/GameLayout.vue";
 import { createSwipeHandlers } from "../utils/touch";
 import { SNAKE_FOODS } from "../data/snakeFoods";
@@ -8,12 +8,14 @@ import { SNAKE_SKINS, getSnakeSkinById } from "../data/snakeSkins";
 import { getBestScore, getSavedValue, setBestScore, setSavedValue } from "../utils/storage";
 
 const canvas = ref(null);
+const gameContainer = ref(null);
 const score = ref(0);
 const best = ref(getBestScore("snake-arena"));
 const status = ref("争夺能量核心");
 const paused = ref(false);
 const selectedSkinId = ref(getSavedValue("snake:skin", "cyber"));
 const selectedSkin = computed(() => getSnakeSkinById(selectedSkinId.value));
+const isFullscreen = ref(false);
 
 const grid = 24;
 const size = 840;
@@ -87,6 +89,50 @@ function spawnFood() {
   foods.push(food);
 }
 
+function enterFullscreen() {
+  if (!gameContainer.value) return;
+  const elem = gameContainer.value;
+  if (elem.requestFullscreen) {
+    elem.requestFullscreen().catch(() => {});
+  } else if (elem.webkitRequestFullscreen) {
+    elem.webkitRequestFullscreen();
+  } else if (elem.mozRequestFullScreen) {
+    elem.mozRequestFullScreen();
+  } else if (elem.msRequestFullscreen) {
+    elem.msRequestFullscreen();
+  }
+}
+
+function exitFullscreen() {
+  if (document.exitFullscreen) {
+    document.exitFullscreen().catch(() => {});
+  } else if (document.webkitExitFullscreen) {
+    document.webkitExitFullscreen();
+  } else if (document.mozCancelFullScreen) {
+    document.mozCancelFullScreen();
+  } else if (document.msExitFullscreen) {
+    document.msExitFullscreen();
+  }
+}
+
+function toggleFullscreen() {
+  if (isFullscreen.value) {
+    exitFullscreen();
+  } else {
+    enterFullscreen();
+  }
+}
+
+function onFullscreenChange() {
+  isFullscreen.value = !!(
+    document.fullscreenElement ||
+    document.webkitFullscreenElement ||
+    document.mozFullScreenElement ||
+    document.msFullscreenElement
+  );
+  setTimeout(() => resize(), 100);
+}
+
 function restart() {
   player = {
     body: [
@@ -112,6 +158,11 @@ function restart() {
   status.value = "争夺能量核心";
   for (let i = 0; i < 10; i += 1) spawnFood();
   draw();
+
+  // 游戏开始时自动进入全屏
+  if (!isFullscreen.value) {
+    setTimeout(() => enterFullscreen(), 100);
+  }
 }
 
 function setDirection(name) {
@@ -491,7 +542,11 @@ function loop(time) {
 
 function resize() {
   const parent = canvas.value.parentElement;
-  const displaySize = Math.max(280, Math.min(parent.clientWidth - 8, parent.clientHeight - 8));
+  // 全屏模式下使用更大的尺寸
+  const maxSize = isFullscreen.value
+    ? Math.min(parent.clientWidth - 16, parent.clientHeight - 16, 1400)
+    : Math.min(parent.clientWidth - 8, parent.clientHeight - 8);
+  const displaySize = Math.max(280, maxSize);
   canvas.value.style.width = `${displaySize}px`;
   canvas.value.style.height = `${displaySize}px`;
 }
@@ -531,6 +586,10 @@ onMounted(() => {
   resize();
   window.addEventListener("resize", resize);
   window.addEventListener("keydown", onKey);
+  document.addEventListener("fullscreenchange", onFullscreenChange);
+  document.addEventListener("webkitfullscreenchange", onFullscreenChange);
+  document.addEventListener("mozfullscreenchange", onFullscreenChange);
+  document.addEventListener("msfullscreenchange", onFullscreenChange);
   loopId = requestAnimationFrame(loop);
 });
 
@@ -538,6 +597,10 @@ onUnmounted(() => {
   cancelAnimationFrame(loopId);
   window.removeEventListener("resize", resize);
   window.removeEventListener("keydown", onKey);
+  document.removeEventListener("fullscreenchange", onFullscreenChange);
+  document.removeEventListener("webkitfullscreenchange", onFullscreenChange);
+  document.removeEventListener("mozfullscreenchange", onFullscreenChange);
+  document.removeEventListener("msfullscreenchange", onFullscreenChange);
 });
 </script>
 
@@ -553,7 +616,16 @@ onUnmounted(() => {
     @restart="restart"
     @toggle-pause="togglePause"
   >
-    <section class="game-panel arena-play-panel">
+    <section ref="gameContainer" class="game-panel arena-play-panel" :class="{ 'is-fullscreen': isFullscreen }">
+      <button
+        class="fullscreen-toggle"
+        type="button"
+        :title="isFullscreen ? '退出全屏' : '进入全屏'"
+        @click="toggleFullscreen"
+      >
+        <Minimize v-if="isFullscreen" :size="20" />
+        <Maximize v-else :size="20" />
+      </button>
       <div
         class="board-shell arena-board-shell"
         @click="gameOver && restart()"
@@ -610,12 +682,57 @@ onUnmounted(() => {
 }
 
 .arena-play-panel {
+  position: relative;
   height: 100%;
+}
+
+.arena-play-panel.is-fullscreen {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  z-index: 9999;
+  background: #020611;
+  padding: 12px;
+  margin: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.fullscreen-toggle {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  z-index: 10;
+  display: grid;
+  place-items: center;
+  width: 42px;
+  height: 42px;
+  padding: 0;
+  border: 1px solid rgba(145, 235, 255, 0.3);
+  border-radius: 8px;
+  background: rgba(7, 13, 27, 0.88);
+  color: var(--cyan);
+  cursor: pointer;
+  transition: all 0.2s ease;
+  backdrop-filter: blur(8px);
+}
+
+.fullscreen-toggle:hover {
+  border-color: var(--cyan);
+  box-shadow: 0 0 16px rgba(83, 243, 255, 0.3);
+  transform: translateY(-1px);
 }
 
 .arena-board-shell {
   position: relative;
   padding: 4px;
+}
+
+.is-fullscreen .arena-board-shell {
+  padding: 8px;
 }
 
 .arena-canvas {
@@ -730,6 +847,17 @@ onUnmounted(() => {
 
   :global(.snake-arena-layout .game-content) {
     padding: 4px;
+  }
+
+  .arena-play-panel.is-fullscreen {
+    padding: 8px;
+  }
+
+  .fullscreen-toggle {
+    top: 8px;
+    left: 8px;
+    width: 38px;
+    height: 38px;
   }
 
   .arena-board-shell {

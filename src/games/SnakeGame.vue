@@ -1,6 +1,6 @@
 <script setup>
 import { computed, onMounted, onUnmounted, ref } from "vue";
-import { ChevronDown, Settings } from "lucide-vue-next";
+import { ChevronDown, Settings, Maximize, Minimize } from "lucide-vue-next";
 import GameLayout from "../components/GameLayout.vue";
 import { createSwipeHandlers } from "../utils/touch";
 import { SNAKE_FOODS } from "../data/snakeFoods";
@@ -9,6 +9,7 @@ import { getBestScore, getSavedValue, setBestScore, setSavedValue } from "../uti
 import { getDailyVariantForGame, recordGameResult } from "../utils/progress";
 
 const canvas = ref(null);
+const gameContainer = ref(null);
 const score = ref(0);
 const best = ref(getBestScore("snake"));
 const status = ref("收集能量核心");
@@ -19,6 +20,7 @@ const selectedSkinId = ref(getSavedValue("snake:skin", "cyber"));
 const selectedSkin = computed(() => getSnakeSkinById(selectedSkinId.value));
 const dailyVariant = getDailyVariantForGame("snake");
 const variantEffect = dailyVariant?.effect || "";
+const isFullscreen = ref(false);
 
 const gridCols = 22;
 let gridRows = 22;
@@ -109,6 +111,50 @@ function showRunResult(title, detail) {
   };
 }
 
+function enterFullscreen() {
+  if (!gameContainer.value) return;
+  const elem = gameContainer.value;
+  if (elem.requestFullscreen) {
+    elem.requestFullscreen().catch(() => {});
+  } else if (elem.webkitRequestFullscreen) {
+    elem.webkitRequestFullscreen();
+  } else if (elem.mozRequestFullScreen) {
+    elem.mozRequestFullScreen();
+  } else if (elem.msRequestFullscreen) {
+    elem.msRequestFullscreen();
+  }
+}
+
+function exitFullscreen() {
+  if (document.exitFullscreen) {
+    document.exitFullscreen().catch(() => {});
+  } else if (document.webkitExitFullscreen) {
+    document.webkitExitFullscreen();
+  } else if (document.mozCancelFullScreen) {
+    document.mozCancelFullScreen();
+  } else if (document.msExitFullscreen) {
+    document.msExitFullscreen();
+  }
+}
+
+function toggleFullscreen() {
+  if (isFullscreen.value) {
+    exitFullscreen();
+  } else {
+    enterFullscreen();
+  }
+}
+
+function onFullscreenChange() {
+  isFullscreen.value = !!(
+    document.fullscreenElement ||
+    document.webkitFullscreenElement ||
+    document.mozFullScreenElement ||
+    document.msFullscreenElement
+  );
+  setTimeout(() => resize(), 100);
+}
+
 function restart() {
   const startY = Math.floor(gridRows / 2);
   const startX = Math.floor(gridCols / 2);
@@ -136,6 +182,11 @@ function restart() {
   gameOver = false;
   placeFood();
   draw();
+
+  // 游戏开始时自动进入全屏
+  if (!isFullscreen.value) {
+    setTimeout(() => enterFullscreen(), 100);
+  }
 }
 
 function setDirection(name) {
@@ -462,7 +513,10 @@ function resize() {
   if (!canvas.value) return;
   const parent = canvas.value.parentElement;
   if (!parent) return;
-  const availableWidth = Math.max(280, Math.min(parent.clientWidth - 4, 820));
+
+  // 全屏模式下使用更大的尺寸
+  const maxWidth = isFullscreen.value ? parent.clientWidth - 8 : 820;
+  const availableWidth = Math.max(280, Math.min(parent.clientWidth - 4, maxWidth));
   const availableHeight = Math.max(280, parent.clientHeight - 4);
   const cell = availableWidth / gridCols;
   gridRows = Math.max(12, Math.floor(availableHeight / cell));
@@ -516,6 +570,10 @@ onMounted(() => {
   requestAnimationFrame(resize);
   window.addEventListener("resize", resize);
   window.addEventListener("keydown", onKey);
+  document.addEventListener("fullscreenchange", onFullscreenChange);
+  document.addEventListener("webkitfullscreenchange", onFullscreenChange);
+  document.addEventListener("mozfullscreenchange", onFullscreenChange);
+  document.addEventListener("msfullscreenchange", onFullscreenChange);
   loopId = requestAnimationFrame(loop);
 });
 
@@ -524,6 +582,10 @@ onUnmounted(() => {
   resizeObserver?.disconnect();
   window.removeEventListener("resize", resize);
   window.removeEventListener("keydown", onKey);
+  document.removeEventListener("fullscreenchange", onFullscreenChange);
+  document.removeEventListener("webkitfullscreenchange", onFullscreenChange);
+  document.removeEventListener("mozfullscreenchange", onFullscreenChange);
+  document.removeEventListener("msfullscreenchange", onFullscreenChange);
 });
 </script>
 
@@ -542,7 +604,16 @@ onUnmounted(() => {
     @toggle-pause="togglePause"
     @dismiss-result="runResult = null"
   >
-    <section class="game-panel split-panel snake-play-panel">
+    <section ref="gameContainer" class="game-panel split-panel snake-play-panel" :class="{ 'is-fullscreen': isFullscreen }">
+      <button
+        class="fullscreen-toggle"
+        type="button"
+        :title="isFullscreen ? '退出全屏' : '进入全屏'"
+        @click="toggleFullscreen"
+      >
+        <Minimize v-if="isFullscreen" :size="20" />
+        <Maximize v-else :size="20" />
+      </button>
       <div
         class="board-shell snake-board-shell"
         @touchstart.passive="swipe.onTouchStart"
@@ -599,9 +670,49 @@ onUnmounted(() => {
 }
 
 .snake-play-panel {
+  position: relative;
   grid-template-columns: minmax(0, 1fr) 118px;
   gap: 8px;
   align-items: stretch;
+}
+
+.snake-play-panel.is-fullscreen {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  z-index: 9999;
+  background: #020611;
+  grid-template-columns: minmax(0, 1fr) 140px;
+  gap: 12px;
+  padding: 12px;
+  margin: 0;
+}
+
+.fullscreen-toggle {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  z-index: 10;
+  display: grid;
+  place-items: center;
+  width: 42px;
+  height: 42px;
+  padding: 0;
+  border: 1px solid rgba(145, 235, 255, 0.3);
+  border-radius: 8px;
+  background: rgba(7, 13, 27, 0.88);
+  color: var(--cyan);
+  cursor: pointer;
+  transition: all 0.2s ease;
+  backdrop-filter: blur(8px);
+}
+
+.fullscreen-toggle:hover {
+  border-color: var(--cyan);
+  box-shadow: 0 0 16px rgba(83, 243, 255, 0.3);
+  transform: translateY(-1px);
 }
 
 .snake-board-shell {
@@ -614,12 +725,20 @@ onUnmounted(() => {
   max-height: 100%;
 }
 
+.is-fullscreen .snake-board-shell {
+  padding: 8px;
+}
+
 .snake-side-panel {
   gap: 0;
   overflow: visible;
   padding: 0;
   border: 0;
   background: transparent;
+}
+
+.is-fullscreen .snake-side-panel {
+  overflow-y: auto;
 }
 
 .snake-drawer {
@@ -746,6 +865,17 @@ onUnmounted(() => {
     height: 100%;
   }
 
+  .snake-play-panel.is-fullscreen {
+    padding: 8px;
+  }
+
+  .fullscreen-toggle {
+    top: 8px;
+    left: 8px;
+    width: 38px;
+    height: 38px;
+  }
+
   .snake-board-shell {
     aspect-ratio: auto;
     height: 100%;
@@ -756,6 +886,10 @@ onUnmounted(() => {
   .snake-side-panel {
     max-height: 76px;
     overflow: hidden;
+  }
+
+  .is-fullscreen .snake-side-panel {
+    max-height: 90px;
   }
 
   .snake-drawer {
