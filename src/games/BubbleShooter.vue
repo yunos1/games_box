@@ -299,6 +299,7 @@ function animateBubbleFlight(targetRow, targetCol, color, onComplete) {
     color,
     x: startPos.x,
     y: startPos.y,
+    scale: 1, // 初始缩放比例
   };
 
   function animate(currentTime) {
@@ -310,6 +311,8 @@ function animateBubbleFlight(targetRow, targetCol, color, onComplete) {
 
     flyingBubble.value.x = startPos.x + (endPos.x - startPos.x) * easeProgress;
     flyingBubble.value.y = startPos.y + (endPos.y - startPos.y) * easeProgress;
+    // 从 1.0 缩放到 0.82（与棋盘格子内泡泡的大小一致）
+    flyingBubble.value.scale = 1.0 - progress * 0.18;
 
     if (progress < 1) {
       animationFrame = requestAnimationFrame(animate);
@@ -474,7 +477,8 @@ onUnmounted(() => {
           <div v-if="flyingBubble" class="flying-bubble" :style="{
             '--bubble-color': colorValue(flyingBubble.color),
             left: flyingBubble.x + 'px',
-            top: flyingBubble.y + 'px'
+            top: flyingBubble.y + 'px',
+            transform: `translate(-50%, -50%) scale(${flyingBubble.scale})`
           }">
             <span></span>
           </div>
@@ -650,9 +654,8 @@ onUnmounted(() => {
   z-index: 10;
   width: clamp(28px, 5vmin, 48px);
   aspect-ratio: 1;
-  transform: translate(-50%, -50%);
   pointer-events: none;
-  will-change: left, top;
+  will-change: left, top, transform;
 }
 
 .flying-bubble span {
