@@ -1,4 +1,5 @@
 import { createRouter, createWebHashHistory } from "vue-router";
+import { getGameById } from "../data/games";
 import HomeView from "../views/HomeView.vue";
 
 export const routes = [
@@ -181,6 +182,12 @@ const router = createRouter({
     if (savedPosition) return savedPosition;
     return { top: 0 };
   },
+});
+
+router.beforeEach((to) => {
+  const gameId = to.path.startsWith("/game/") ? to.path.slice("/game/".length) : "";
+  if (gameId && getGameById(gameId)?.hidden) return "/";
+  return true;
 });
 
 export default router;

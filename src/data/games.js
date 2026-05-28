@@ -217,6 +217,7 @@ export const games = [
     icon: towerDefenseIcon,
     accent: "#22d3ee",
     description: "布置炮塔，拦截一波波入侵者。",
+    hidden: true,
   },
   {
     id: "dungeon-rogue",
@@ -239,6 +240,7 @@ export const games = [
     icon: rhythmGameIcon,
     accent: "#fb7185",
     description: "在判定线上命中下落音符。",
+    hidden: true,
   },
   {
     id: "asteroid-dodge",
@@ -284,6 +286,7 @@ export const games = [
     icon: solitaireIcon,
     accent: "#e879f9",
     description: "整理牌列，按顺序收集到基座。",
+    hidden: true,
   },
   {
     id: "gomoku",
@@ -306,6 +309,7 @@ export const games = [
     icon: reversiIcon,
     accent: "#a3e635",
     description: "夹击翻转棋子，占据更多格子。",
+    hidden: true,
   },
   {
     id: "wordle-zh",

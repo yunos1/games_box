@@ -1,4 +1,4 @@
-import { games, getGameById } from "../data/games";
+import { visibleGames as games } from "../data/games";
 import { getProgress } from "./storage";
 import {
   getDailyChallenge,
@@ -48,7 +48,7 @@ function progressForGame(gameId) {
 }
 
 function buildNode(gameId, index, chapterId, previousCompleted = true) {
-  const game = getGameById(gameId);
+  const game = games.find((item) => item.id === gameId);
   if (!game) return null;
   const summary = getGameStarSummary(gameId);
   const progress = progressForGame(gameId);
@@ -81,12 +81,11 @@ export function getCampaignChapters() {
   return campaignDefinitions.map((chapter) => {
     let previousCompleted = true;
     const nodes = chapter.gameIds
-      .map((gameId, index) => {
-        const node = buildNode(gameId, index, chapter.id, previousCompleted);
+      .reduce((items, gameId) => {
+        const node = buildNode(gameId, items.length, chapter.id, previousCompleted);
         if (node) previousCompleted = node.completed;
-        return node;
-      })
-      .filter(Boolean);
+        return node ? [...items, node] : items;
+      }, []);
     const completed = nodes.filter((node) => node.completed).length;
     const mastered = nodes.filter((node) => node.mastered).length;
     const stars = nodes.reduce((total, node) => total + node.stars, 0);
