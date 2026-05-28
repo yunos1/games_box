@@ -19,6 +19,17 @@ export const routes = [
     component: () => import("../views/CampaignView.vue"),
   },
   {
+    path: "/online",
+    name: "online",
+    component: () => import("../views/OnlineView.vue"),
+  },
+  {
+    path: "/online/snake/:roomCode",
+    name: "online-snake-room",
+    component: () => import("../games/MultiplayerSnake.vue"),
+    props: true,
+  },
+  {
     path: "/game/guess-number",
     name: "guess-number",
     component: () => import("../games/GuessNumber.vue"),

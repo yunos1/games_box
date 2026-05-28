@@ -1,6 +1,16 @@
 name = "neon-game-box"
+main = "worker/index.js"
 compatibility_date = "2025-01-01"
 
 [assets]
 directory = "./dist"
+binding = "ASSETS"
 not_found_handling = "single-page-application"
+
+[[durable_objects.bindings]]
+name = "SNAKE_ROOMS"
+class_name = "SnakeRoom"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["SnakeRoom"]

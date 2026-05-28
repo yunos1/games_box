@@ -161,6 +161,68 @@ a {
   box-shadow: 0 0 10px rgba(83, 243, 255, 0.52);
 }
 
+.mode-switch {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  padding: 16px 0 0;
+}
+
+.mode-card {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 12px;
+  align-items: center;
+  min-height: 72px;
+  padding: 14px 16px;
+  border: 1px solid rgba(145, 235, 255, 0.16);
+  border-radius: var(--radius);
+  background:
+    linear-gradient(145deg, rgba(9, 18, 38, 0.78), rgba(6, 11, 24, 0.64)),
+    radial-gradient(circle at 8% 0%, rgba(83, 243, 255, 0.12), transparent 42%);
+  color: var(--muted);
+  transition:
+    border-color 0.18s ease,
+    transform 0.18s ease,
+    background 0.18s ease;
+}
+
+.mode-card:hover,
+.mode-card.active {
+  border-color: rgba(83, 243, 255, 0.42);
+  background:
+    linear-gradient(145deg, rgba(10, 24, 48, 0.86), rgba(7, 13, 28, 0.72)),
+    radial-gradient(circle at 8% 0%, rgba(83, 243, 255, 0.18), transparent 44%);
+  color: var(--text);
+}
+
+.mode-card:hover {
+  transform: translateY(-2px);
+}
+
+.mode-card svg {
+  color: var(--cyan);
+}
+
+.mode-card span,
+.mode-card strong {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mode-card span {
+  color: var(--text);
+  font-weight: 900;
+}
+
+.mode-card strong {
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+
 .home-tabs {
   display: grid;
   grid-template-columns: repeat(6, minmax(0, 1fr));
@@ -1994,6 +2056,17 @@ a {
     margin: 0;
     overflow: visible;
     padding: 12px 0 0;
+  }
+
+  .mode-switch {
+    grid-template-columns: 1fr;
+    gap: 8px;
+    padding-top: 12px;
+  }
+
+  .mode-card {
+    min-height: 58px;
+    padding: 11px;
   }
 
   .home-tab-button {

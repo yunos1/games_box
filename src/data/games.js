@@ -370,6 +370,18 @@ export const games = [
     description: "和 AI 蛇争夺能量核心。",
   },
   {
+    id: "multiplayer-snake",
+    title: "多人贪吃蛇",
+    subtitle: "房间竞技",
+    tag: "联机",
+    difficulty: "房间",
+    route: "/online",
+    icon: snakeArenaIcon,
+    accent: "#7dff6f",
+    description: "创建房间，邀请朋友加入同一局。",
+    hidden: true,
+  },
+  {
     id: "boss-rush",
     title: "Boss Rush 飞机大战",
     subtitle: "首领弹幕",

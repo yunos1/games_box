@@ -256,6 +256,23 @@ watch(
       </div>
     </section>
 
+    <section class="mode-switch" aria-label="游玩区域">
+      <article class="mode-card active">
+        <Gamepad2 :size="21" />
+        <div>
+          <span>单机游戏</span>
+          <strong>{{ games.length }} 款本地挑战</strong>
+        </div>
+      </article>
+      <RouterLink class="mode-card" to="/online">
+        <Swords :size="21" />
+        <div>
+          <span>联机游戏</span>
+          <strong>多人贪吃蛇房间</strong>
+        </div>
+      </RouterLink>
+    </section>
+
     <nav class="home-tabs" aria-label="首页分类">
       <button
         v-for="tab in tabs"
