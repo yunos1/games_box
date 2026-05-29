@@ -17,8 +17,29 @@ const selectedSkinId = ref(getSavedValue("snake:skin", "cyber"));
 const selectedSkin = computed(() => getSnakeSkinById(selectedSkinId.value));
 const isFullscreen = ref(false);
 
-const grid = 24;
 const size = 840;
+const VIEWPORT_GRID = 24;
+const WORLD_SCALE = 10;
+const grid = VIEWPORT_GRID * WORLD_SCALE;
+const CELL_SIZE = size / VIEWPORT_GRID;
+const CAMERA_SMOOTHING = 0.34;
+const FOOD_TARGET = 72;
+const LOCAL_FOOD_RATIO = 0.62;
+const CONTESTED_FOOD_RATIO = 0.18;
+const FOOD_SPAWN_RADIUS = 22;
+const EXPLORE_FOOD_RADIUS = 72;
+const SPATIAL_BUCKET_SIZE = 12;
+const MINIMAP_SIZE = 132;
+const MINIMAP_PADDING = 12;
+const MINIMAP_DENSITY_CELL = 4;
+const MINIMAP_DENSITY_SAMPLE_TARGET = 1100;
+const EDGE_HINT_PADDING = 34;
+const EDGE_HINT_DISTANCE = 34;
+const BOUNDARY_WARNING_CELLS = 7;
+const LONG_SNAKE_LENGTH = 720;
+const LONG_SNAKE_EXACT_SEGMENTS = 260;
+const LONG_SNAKE_TAIL_KEEP_SEGMENTS = 24;
+const LONG_SNAKE_VISIBLE_BUDGET = 560;
 const dirs = {
   up: { x: 0, y: -1 },
   down: { x: 0, y: 1 },
@@ -35,6 +56,10 @@ let nextDirection;
 let loopId = 0;
 let lastTick = 0;
 let gameOver = false;
+let camera = { x: 0, y: 0 };
+let cameraReady = false;
+let stateTick = 0;
+let spatialCache = createSpatialCache();
 const foodImages = new Map();
 let foodBag = [];
 let lastFoodId = "";
@@ -68,6 +93,10 @@ function same(a, b) {
   return a.x === b.x && a.y === b.y;
 }
 
+function clamp(value, min, max) {
+  return Math.max(min, Math.min(max, value));
+}
+
 function allSegments() {
   return [...player.body, ...aiSnakes.flatMap((snake) => snake.body)];
 }
@@ -78,15 +107,38 @@ function occupied(point) {
 
 function spawnFood() {
   let food;
+  const anchors = [player.body[0], ...aiSnakes.map((snake) => snake.body[0])].filter(Boolean);
+  const modeRoll = Math.random();
+  const mode = modeRoll < LOCAL_FOOD_RATIO ? "local" : modeRoll < LOCAL_FOOD_RATIO + CONTESTED_FOOD_RATIO ? "contested" : "explore";
   do {
+    const anchor = foodAnchor(anchors, mode);
+    const radius = mode === "explore" ? EXPLORE_FOOD_RADIUS : FOOD_SPAWN_RADIUS;
+    const isBonus = mode === "contested" || Math.random() < 0.16;
     food = {
-      x: Math.floor(Math.random() * grid),
-      y: Math.floor(Math.random() * grid),
-      value: Math.random() < 0.16 ? 30 : 10,
+      x: anchor
+        ? clamp(anchor.x + Math.floor(Math.random() * (radius * 2 + 1)) - radius, 0, grid - 1)
+        : Math.floor(Math.random() * grid),
+      y: anchor
+        ? clamp(anchor.y + Math.floor(Math.random() * (radius * 2 + 1)) - radius, 0, grid - 1)
+        : Math.floor(Math.random() * grid),
+      value: isBonus ? 30 : 10,
       asset: nextFoodAsset(),
     };
   } while (occupied(food) || foods.some((item) => same(item, food)));
   foods.push(food);
+}
+
+function foodAnchor(anchors, mode) {
+  if (!anchors.length) return null;
+  if (mode === "contested" && anchors.length > 1) {
+    const first = anchors[Math.floor(Math.random() * anchors.length)];
+    const second = anchors[Math.floor(Math.random() * anchors.length)];
+    return {
+      x: Math.round((first.x + second.x) / 2),
+      y: Math.round((first.y + second.y) / 2),
+    };
+  }
+  return anchors[Math.floor(Math.random() * anchors.length)];
 }
 
 function enterFullscreen() {
@@ -133,30 +185,37 @@ function onFullscreenChange() {
   setTimeout(() => resize(), 100);
 }
 
+function makeStartBody(x, y, dirName, length) {
+  const dir = dirs[dirName];
+  const head = { x: x * WORLD_SCALE, y: y * WORLD_SCALE };
+  return Array.from({ length }, (_, index) => ({
+    x: head.x - dir.x * index,
+    y: head.y - dir.y * index,
+  }));
+}
+
 function restart() {
   player = {
-    body: [
-      { x: 12, y: 16 },
-      { x: 11, y: 16 },
-      { x: 10, y: 16 },
-      { x: 9, y: 16 },
-    ],
+    body: makeStartBody(12, 16, "right", 4),
   };
   aiSnakes = [
-    { body: [{ x: 5, y: 5 }, { x: 4, y: 5 }, { x: 3, y: 5 }], dir: "right", skinId: "candy", respawn: 0 },
-    { body: [{ x: 19, y: 7 }, { x: 20, y: 7 }, { x: 21, y: 7 }], dir: "left", skinId: "tiger", respawn: 0 },
-    { body: [{ x: 8, y: 20 }, { x: 8, y: 21 }, { x: 8, y: 22 }], dir: "up", skinId: "jungle", respawn: 0 },
+    { id: "candy", body: makeStartBody(5, 5, "right", 3), dir: "right", skinId: "candy", respawn: 0 },
+    { id: "tiger", body: makeStartBody(19, 7, "left", 3), dir: "left", skinId: "tiger", respawn: 0 },
+    { id: "jungle", body: makeStartBody(8, 20, "up", 3), dir: "up", skinId: "jungle", respawn: 0 },
   ];
   foods = [];
   lastFoodId = "";
   shuffleFoods();
   direction = dirs.right;
   nextDirection = dirs.right;
+  cameraReady = false;
+  spatialCache = createSpatialCache();
   score.value = 0;
   paused.value = false;
   gameOver = false;
   status.value = "争夺能量核心";
-  for (let i = 0; i < 10; i += 1) spawnFood();
+  for (let i = 0; i < FOOD_TARGET; i += 1) spawnFood();
+  stateTick += 1;
   draw();
 
   // 游戏开始时自动进入全屏
@@ -185,9 +244,9 @@ function killAi(snake) {
 
 function respawnAi(snake, index) {
   const starts = [
-    [{ x: 5, y: 5 }, { x: 4, y: 5 }, { x: 3, y: 5 }],
-    [{ x: 19, y: 7 }, { x: 20, y: 7 }, { x: 21, y: 7 }],
-    [{ x: 8, y: 20 }, { x: 8, y: 21 }, { x: 8, y: 22 }],
+    makeStartBody(5, 5, "right", 3),
+    makeStartBody(19, 7, "left", 3),
+    makeStartBody(8, 20, "up", 3),
   ];
   snake.body = starts[index].map((part) => ({ ...part }));
   snake.dir = index === 1 ? "left" : index === 2 ? "up" : "right";
@@ -272,6 +331,7 @@ function step() {
   if (paused.value || gameOver) return;
   movePlayer();
   if (!gameOver) moveAi();
+  stateTick += 1;
 }
 
 function roundedRect(x, y, width, height, radius) {
@@ -282,6 +342,300 @@ function roundedRect(x, y, width, height, radius) {
   ctx.arcTo(x, y + height, x, y, radius);
   ctx.arcTo(x, y, x + width, y, radius);
   ctx.closePath();
+}
+
+function worldSize() {
+  return grid * CELL_SIZE;
+}
+
+function targetCameraOffset() {
+  const world = worldSize();
+  const head = player?.body?.[0];
+  const target = head
+    ? {
+        x: head.x * CELL_SIZE + CELL_SIZE / 2 - size / 2,
+        y: head.y * CELL_SIZE + CELL_SIZE / 2 - size / 2,
+      }
+    : {
+        x: Math.max(0, (world - size) / 2),
+        y: Math.max(0, (world - size) / 2),
+      };
+
+  return {
+    x: clamp(target.x, 0, Math.max(0, world - size)),
+    y: clamp(target.y, 0, Math.max(0, world - size)),
+  };
+}
+
+function cameraOffset() {
+  const target = targetCameraOffset();
+  if (!cameraReady) {
+    camera = target;
+    cameraReady = true;
+    return camera;
+  }
+
+  camera = {
+    x: camera.x + (target.x - camera.x) * CAMERA_SMOOTHING,
+    y: camera.y + (target.y - camera.y) * CAMERA_SMOOTHING,
+  };
+  return camera;
+}
+
+function isPointVisible(point, camera, padding = 2) {
+  const x = point.x * CELL_SIZE;
+  const y = point.y * CELL_SIZE;
+  return (
+    x >= camera.x - padding * CELL_SIZE &&
+    y >= camera.y - padding * CELL_SIZE &&
+    x <= camera.x + size + padding * CELL_SIZE &&
+    y <= camera.y + size + padding * CELL_SIZE
+  );
+}
+
+function bucketKey(x, y) {
+  return `${Math.floor(x / SPATIAL_BUCKET_SIZE)}:${Math.floor(y / SPATIAL_BUCKET_SIZE)}`;
+}
+
+function createSpatialCache(tick = -1) {
+  return {
+    tick,
+    foods: null,
+    snakes: new Map(),
+    minimapDensities: new Map(),
+  };
+}
+
+function ensureSpatialCache() {
+  if (spatialCache.tick !== stateTick) {
+    spatialCache = createSpatialCache(stateTick);
+  }
+}
+
+function buildPointBuckets(points) {
+  const buckets = new Map();
+  points.forEach((point) => {
+    const key = bucketKey(point.x, point.y);
+    if (!buckets.has(key)) buckets.set(key, []);
+    buckets.get(key).push(point);
+  });
+  return buckets;
+}
+
+function queryBuckets(buckets, camera, padding = 2) {
+  const left = Math.floor((camera.x / CELL_SIZE - padding) / SPATIAL_BUCKET_SIZE);
+  const right = Math.floor(((camera.x + size) / CELL_SIZE + padding) / SPATIAL_BUCKET_SIZE);
+  const top = Math.floor((camera.y / CELL_SIZE - padding) / SPATIAL_BUCKET_SIZE);
+  const bottom = Math.floor(((camera.y + size) / CELL_SIZE + padding) / SPATIAL_BUCKET_SIZE);
+  const items = [];
+  for (let y = top; y <= bottom; y += 1) {
+    for (let x = left; x <= right; x += 1) {
+      const bucket = buckets.get(`${x}:${y}`);
+      if (bucket) items.push(...bucket);
+    }
+  }
+  return items;
+}
+
+function cachedFoodBuckets() {
+  ensureSpatialCache();
+  if (!spatialCache.foods) spatialCache.foods = buildPointBuckets(foods || []);
+  return spatialCache.foods;
+}
+
+function snakeId(snake, isPlayer) {
+  return isPlayer ? "player" : snake.id || snake.skinId || snake.dir;
+}
+
+function cachedSnakeBuckets(snake, isPlayer) {
+  ensureSpatialCache();
+  const cacheKey = snakeId(snake, isPlayer);
+  if (!spatialCache.snakes.has(cacheKey)) {
+    const parts = (snake.body || []).map((part, index) => ({ ...part, index }));
+    spatialCache.snakes.set(cacheKey, buildPointBuckets(parts));
+  }
+  return spatialCache.snakes.get(cacheKey);
+}
+
+function visibleFoods(camera) {
+  return queryBuckets(cachedFoodBuckets(), camera).filter((food) => isPointVisible(food, camera));
+}
+
+function worldToScreen(point, camera) {
+  return {
+    x: point.x * CELL_SIZE + CELL_SIZE / 2 - camera.x,
+    y: point.y * CELL_SIZE + CELL_SIZE / 2 - camera.y,
+  };
+}
+
+function hexToRgb(hex) {
+  const normalized = String(hex || "").replace("#", "");
+  if (!/^[\da-f]{6}$/i.test(normalized)) return { r: 83, g: 243, b: 255 };
+  const value = Number.parseInt(normalized, 16);
+  return {
+    r: (value >> 16) & 255,
+    g: (value >> 8) & 255,
+    b: value & 255,
+  };
+}
+
+function colorWithAlpha(hex, alpha) {
+  const { r, g, b } = hexToRgb(hex);
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+}
+
+function cachedMinimapDensity(snake, key, minimapSize) {
+  ensureSpatialCache();
+  const cacheKey = `${key}:${Math.round(minimapSize)}`;
+  if (spatialCache.minimapDensities.has(cacheKey)) return spatialCache.minimapDensities.get(cacheKey);
+
+  const body = snake.body || [];
+  const cols = Math.max(1, Math.ceil(minimapSize / MINIMAP_DENSITY_CELL));
+  const rows = cols;
+  const cellSize = minimapSize / cols;
+  const stride = Math.max(1, Math.ceil(body.length / MINIMAP_DENSITY_SAMPLE_TARGET));
+  const bins = new Map();
+  for (let index = 0; index < body.length; index += stride) {
+    const part = body[index];
+    const binX = clamp(Math.floor((part.x / grid) * cols), 0, cols - 1);
+    const binY = clamp(Math.floor((part.y / grid) * rows), 0, rows - 1);
+    const binKey = `${binX}:${binY}`;
+    bins.set(binKey, (bins.get(binKey) || 0) + Math.min(stride, body.length - index));
+  }
+
+  let maxCount = 1;
+  const cells = [...bins.entries()].map(([binKey, count]) => {
+    const [binX, binY] = binKey.split(":").map(Number);
+    maxCount = Math.max(maxCount, count);
+    return { binX, binY, count };
+  });
+  const density = { cells, maxCount, cellSize };
+  spatialCache.minimapDensities.set(cacheKey, density);
+  return density;
+}
+
+function drawMinimapSnakeDensity(snake, skin, key, x, y, minimapSize) {
+  if (!snake.body?.length) return;
+  const density = cachedMinimapDensity(snake, key, minimapSize);
+  density.cells.forEach((cell) => {
+    const strength = Math.min(1, cell.count / density.maxCount);
+    ctx.fillStyle = colorWithAlpha(skin.body, 0.12 + strength * 0.34);
+    ctx.fillRect(
+      x + cell.binX * density.cellSize,
+      y + cell.binY * density.cellSize,
+      Math.max(1.4, density.cellSize + 0.5),
+      Math.max(1.4, density.cellSize + 0.5),
+    );
+  });
+}
+
+function drawMinimap(camera) {
+  const minimapSize = Math.min(MINIMAP_SIZE, size * 0.24);
+  const x = size - minimapSize - MINIMAP_PADDING;
+  const y = size - minimapSize - MINIMAP_PADDING;
+  const scale = minimapSize / grid;
+  const viewX = x + clamp(camera.x / CELL_SIZE, 0, grid) * scale;
+  const viewY = y + clamp(camera.y / CELL_SIZE, 0, grid) * scale;
+  const viewSize = VIEWPORT_GRID * scale;
+
+  ctx.save();
+  ctx.shadowBlur = 12;
+  ctx.shadowColor = "rgba(83, 243, 255, 0.22)";
+  ctx.fillStyle = "rgba(3, 8, 18, 0.76)";
+  roundedRect(x, y, minimapSize, minimapSize, 8);
+  ctx.fill();
+  ctx.shadowBlur = 0;
+  ctx.strokeStyle = "rgba(145, 235, 255, 0.3)";
+  ctx.stroke();
+
+  ctx.save();
+  roundedRect(x, y, minimapSize, minimapSize, 8);
+  ctx.clip();
+  aiSnakes.forEach((snake) => {
+    drawMinimapSnakeDensity(snake, getSnakeSkinById(snake.skinId), snakeId(snake, false), x, y, minimapSize);
+  });
+
+  foods.forEach((food) => {
+    ctx.fillStyle = food.value > 10 ? "#facc15" : "#ffd166";
+    ctx.fillRect(x + food.x * scale - 1, y + food.y * scale - 1, 2, 2);
+  });
+
+  [
+    { snake: player, skin: selectedSkin.value, key: "player", radius: 3, color: "#ffffff" },
+    ...aiSnakes.map((snake) => ({ snake, skin: getSnakeSkinById(snake.skinId), key: snakeId(snake, false), radius: 2.2 })),
+  ].forEach(({ snake, skin, radius, color }) => {
+    const head = snake.body?.[0];
+    if (!head) return;
+    ctx.fillStyle = color || skin.head;
+    ctx.beginPath();
+    ctx.arc(x + head.x * scale, y + head.y * scale, radius, 0, Math.PI * 2);
+    ctx.fill();
+  });
+  ctx.restore();
+
+  ctx.strokeStyle = "rgba(83, 243, 255, 0.56)";
+  ctx.lineWidth = 1;
+  ctx.strokeRect(viewX, viewY, viewSize, viewSize);
+  ctx.restore();
+}
+
+function drawEdgeHint(point, camera, color, radius = 7) {
+  const screen = worldToScreen(point, camera);
+  if (
+    screen.x >= EDGE_HINT_PADDING &&
+    screen.y >= EDGE_HINT_PADDING &&
+    screen.x <= size - EDGE_HINT_PADDING &&
+    screen.y <= size - EDGE_HINT_PADDING
+  ) {
+    return;
+  }
+
+  const center = { x: size / 2, y: size / 2 };
+  const angle = Math.atan2(screen.y - center.y, screen.x - center.x);
+  const x = clamp(center.x + Math.cos(angle) * (size / 2 - EDGE_HINT_DISTANCE), EDGE_HINT_PADDING, size - EDGE_HINT_PADDING);
+  const y = clamp(center.y + Math.sin(angle) * (size / 2 - EDGE_HINT_DISTANCE), EDGE_HINT_PADDING, size - EDGE_HINT_PADDING);
+
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.rotate(angle);
+  ctx.fillStyle = color;
+  ctx.shadowBlur = 12;
+  ctx.shadowColor = color;
+  ctx.beginPath();
+  ctx.moveTo(radius + 6, 0);
+  ctx.lineTo(-radius, -radius);
+  ctx.lineTo(-radius, radius);
+  ctx.closePath();
+  ctx.fill();
+  ctx.restore();
+}
+
+function drawEdgeHints(camera) {
+  [...foods]
+    .sort((a, b) => b.value - a.value)
+    .slice(0, 8)
+    .forEach((food) => drawEdgeHint(food, camera, food.value > 10 ? "#facc15" : "#ffd166", 5));
+
+  aiSnakes.forEach((snake) => {
+    const head = snake.body?.[0];
+    if (!head) return;
+    drawEdgeHint(head, camera, getSnakeSkinById(snake.skinId).head, 7);
+  });
+}
+
+function drawBoundaryWarning() {
+  const head = player?.body?.[0];
+  if (!head) return;
+  const distance = Math.min(head.x, head.y, grid - 1 - head.x, grid - 1 - head.y);
+  if (distance > BOUNDARY_WARNING_CELLS) return;
+  const alpha = 1 - distance / BOUNDARY_WARNING_CELLS;
+
+  ctx.save();
+  ctx.globalAlpha = 0.18 + alpha * 0.34;
+  ctx.strokeStyle = "#facc15";
+  ctx.lineWidth = 8;
+  ctx.strokeRect(4, 4, size - 8, size - 8);
+  ctx.restore();
 }
 
 function drawSkinPattern(skin, x, y, partSize, index) {
@@ -391,16 +745,42 @@ function drawSkinPattern(skin, x, y, partSize, index) {
   ctx.restore();
 }
 
-function drawSnakePart(part, index, cell, skin, dir) {
+function shouldSimplifySnakePart(index, bodyLength) {
+  return bodyLength > LONG_SNAKE_LENGTH && index >= LONG_SNAKE_EXACT_SEGMENTS && index < bodyLength - LONG_SNAKE_TAIL_KEEP_SEGMENTS;
+}
+
+function clipVisibleSnakeParts(parts, bodyLength) {
+  if (bodyLength <= LONG_SNAKE_LENGTH || parts.length <= LONG_SNAKE_VISIBLE_BUDGET) return parts;
+
+  const tailKeepStart = Math.max(LONG_SNAKE_EXACT_SEGMENTS, bodyLength - LONG_SNAKE_TAIL_KEEP_SEGMENTS);
+  const exact = [];
+  const tail = [];
+  const middle = [];
+  parts.forEach((part) => {
+    if (part.index < LONG_SNAKE_EXACT_SEGMENTS) exact.push(part);
+    else if (part.index >= tailKeepStart) tail.push(part);
+    else middle.push(part);
+  });
+
+  const middleBudget = Math.max(0, LONG_SNAKE_VISIBLE_BUDGET - exact.length - tail.length);
+  if (middle.length <= middleBudget) return parts;
+
+  const stride = Math.max(1, Math.ceil(middle.length / Math.max(1, middleBudget)));
+  return [...exact, ...middle.filter((_, index) => index % stride === 0), ...tail].sort((a, b) => b.index - a.index);
+}
+
+function drawSnakePart(part, index, cell, skin, dir, simplified = false) {
   const gap = Math.max(0.5, cell * 0.016);
-  const x = part.x * cell + gap;
-  const y = part.y * cell + gap;
-  const partSize = cell - gap * 2;
-  const center = { x: x + partSize / 2, y: y + partSize / 2 };
   const isHead = index === 0;
+  const inset = simplified && !isHead ? cell * 0.08 : 0;
+  const x = part.x * cell + gap + inset;
+  const y = part.y * cell + gap + inset;
+  const partSize = cell - gap * 2 - inset * 2;
+  const center = { x: x + partSize / 2, y: y + partSize / 2 };
 
   ctx.save();
-  ctx.shadowBlur = isHead ? 18 : 11;
+  ctx.globalAlpha = simplified && !isHead ? 0.72 : 1;
+  ctx.shadowBlur = isHead ? 18 : simplified ? 4 : 11;
   ctx.shadowColor = isHead ? skin.head : skin.glow;
   const fill = ctx.createLinearGradient(x, y, x + partSize, y + partSize);
   fill.addColorStop(0, isHead ? skin.head : skin.body);
@@ -409,11 +789,13 @@ function drawSnakePart(part, index, cell, skin, dir) {
   roundedRect(x, y, partSize, partSize, isHead ? partSize * 0.42 : partSize * 0.34);
   ctx.fill();
 
-  ctx.shadowBlur = 0;
-  ctx.fillStyle = "rgba(255,255,255,0.22)";
-  roundedRect(x + partSize * 0.18, y + partSize * 0.14, partSize * 0.32, partSize * 0.14, partSize * 0.07);
-  ctx.fill();
-  if (!isHead) drawSkinPattern(skin, x, y, partSize, index);
+  if (!simplified || isHead) {
+    ctx.shadowBlur = 0;
+    ctx.fillStyle = "rgba(255,255,255,0.22)";
+    roundedRect(x + partSize * 0.18, y + partSize * 0.14, partSize * 0.32, partSize * 0.14, partSize * 0.07);
+    ctx.fill();
+    if (!isHead) drawSkinPattern(skin, x, y, partSize, index);
+  }
 
   if (isHead) {
     const forward = dir || dirs.right;
@@ -499,35 +881,62 @@ function drawFood(food, cell) {
   ctx.restore();
 }
 
-function drawSnake(snake, isPlayer = false) {
-  const cell = size / grid;
+function drawSnake(snake, isPlayer = false, cameraView = camera) {
   const skin = isPlayer ? selectedSkin.value : getSnakeSkinById(snake.skinId);
   const dir = isPlayer ? direction : dirs[snake.dir];
-  [...snake.body].reverse().forEach((part, reversedIndex) => {
-    drawSnakePart(part, snake.body.length - 1 - reversedIndex, cell, skin, dir);
+  const buckets = cachedSnakeBuckets(snake, isPlayer);
+  const bodyLength = snake.body?.length || 0;
+  const parts = queryBuckets(buckets, cameraView)
+    .filter((part) => isPointVisible(part, cameraView))
+    .sort((a, b) => b.index - a.index);
+  clipVisibleSnakeParts(parts, bodyLength).forEach((part) => {
+    drawSnakePart(part, part.index, CELL_SIZE, skin, dir, shouldSimplifySnakePart(part.index, bodyLength));
   });
 }
 
 function draw() {
   if (!ctx) return;
-  const cell = size / grid;
+  const camera = cameraOffset();
+  const world = worldSize();
   ctx.clearRect(0, 0, size, size);
   ctx.fillStyle = "#020611";
   ctx.fillRect(0, 0, size, size);
+
+  ctx.save();
+  ctx.translate(-camera.x, -camera.y);
+
   ctx.strokeStyle = "rgba(83, 243, 255, 0.06)";
-  for (let i = 0; i <= grid; i += 1) {
-    const pos = i * cell;
+  ctx.lineWidth = 1;
+  const startCol = Math.max(0, Math.floor(camera.x / CELL_SIZE) - 1);
+  const endCol = Math.min(grid, Math.ceil((camera.x + size) / CELL_SIZE) + 1);
+  const startRow = Math.max(0, Math.floor(camera.y / CELL_SIZE) - 1);
+  const endRow = Math.min(grid, Math.ceil((camera.y + size) / CELL_SIZE) + 1);
+  for (let i = startCol; i <= endCol; i += 1) {
+    const pos = i * CELL_SIZE;
     ctx.beginPath();
-    ctx.moveTo(pos, 0);
-    ctx.lineTo(pos, size);
-    ctx.moveTo(0, pos);
-    ctx.lineTo(size, pos);
+    ctx.moveTo(pos, Math.max(0, camera.y - CELL_SIZE * 2));
+    ctx.lineTo(pos, Math.min(world, camera.y + size + CELL_SIZE * 2));
+    ctx.stroke();
+  }
+  for (let i = startRow; i <= endRow; i += 1) {
+    const pos = i * CELL_SIZE;
+    ctx.beginPath();
+    ctx.moveTo(Math.max(0, camera.x - CELL_SIZE * 2), pos);
+    ctx.lineTo(Math.min(world, camera.x + size + CELL_SIZE * 2), pos);
     ctx.stroke();
   }
 
-  foods.forEach((food) => drawFood(food, cell));
-  drawSnake(player, true);
-  aiSnakes.forEach((snake) => drawSnake(snake));
+  ctx.strokeStyle = "rgba(255, 209, 102, 0.28)";
+  ctx.lineWidth = 4;
+  ctx.strokeRect(0, 0, world, world);
+
+  visibleFoods(camera).forEach((food) => drawFood(food, CELL_SIZE));
+  drawSnake(player, true, camera);
+  aiSnakes.forEach((snake) => drawSnake(snake, false, camera));
+  ctx.restore();
+  drawBoundaryWarning();
+  drawEdgeHints(camera);
+  drawMinimap(camera);
   ctx.shadowBlur = 0;
 }
 
