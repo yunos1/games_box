@@ -4,12 +4,15 @@ const MAX_PLAYERS = 6;
 const MIN_PLAYERS = 2;
 const TICK_MS = 115;
 const FOOD_TARGET = 72;
+const HIT_RADIUS = 0.72;
+const FOOD_PICKUP_RADIUS = 0.86;
+const HIT_RADIUS_SQUARED = HIT_RADIUS * HIT_RADIUS;
+const FOOD_PICKUP_RADIUS_SQUARED = FOOD_PICKUP_RADIUS * FOOD_PICKUP_RADIUS;
 const LOCAL_FOOD_RATIO = 0.62;
 const CONTESTED_FOOD_RATIO = 0.18;
 const FOOD_SPAWN_RADIUS = 22;
 const EXPLORE_FOOD_RADIUS = 72;
 const ROOM_CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
-const VALID_DIRECTIONS = new Set(["up", "down", "left", "right"]);
 const SKIN_IDS = new Set(["cyber", "lava", "frost", "jungle", "royal", "candy", "galaxy", "jade", "tiger", "ghost"]);
 const FOOD_IDS = [
   "apple",
@@ -103,21 +106,29 @@ function createRoomState(roomCode) {
 }
 
 function same(a, b) {
-  return a.x === b.x && a.y === b.y;
+  return distanceSquared(a, b) <= HIT_RADIUS_SQUARED;
 }
 
-function pointKey(point) {
-  return `${point.x}:${point.y}`;
+function distanceSquared(a, b) {
+  const dx = a.x - b.x;
+  const dy = a.y - b.y;
+  return dx * dx + dy * dy;
 }
 
 function inBounds(point) {
   return point.x >= 0 && point.y >= 0 && point.x < GRID_WIDTH && point.y < GRID_HEIGHT;
 }
 
-function opposite(a, b) {
-  const first = DIRS[a];
-  const second = DIRS[b];
-  return first && second && first.x + second.x === 0 && first.y + second.y === 0;
+function normalizeDirection(value) {
+  const dir = typeof value === "string" ? DIRS[value] : value;
+  const x = Number(dir?.x);
+  const y = Number(dir?.y);
+  const length = Math.hypot(x, y);
+  if (!Number.isFinite(length) || length <= 0) return null;
+  return {
+    x: x / length,
+    y: y / length,
+  };
 }
 
 function clamp(value, min, max) {
@@ -216,7 +227,8 @@ export class SnakeRoom {
 
     if (data.type === "input") {
       if (this.room.phase !== "playing" || !player.alive) return;
-      if (VALID_DIRECTIONS.has(data.direction)) this.pendingDirections.set(playerId, data.direction);
+      const direction = normalizeDirection(data.direction);
+      if (direction) this.pendingDirections.set(playerId, direction);
       return;
     }
 
@@ -373,7 +385,7 @@ export class SnakeRoom {
       player.alive = true;
       this.room.snakes[player.id] = {
         playerId: player.id,
-        dir: start.dir,
+        dir: normalizeDirection(start.dir) || DIRS.right,
         body: start.body.map((part) => ({ ...part })),
       };
     });
@@ -391,7 +403,6 @@ export class SnakeRoom {
   }
 
   spawnFood() {
-    const occupied = this.occupiedPoints();
     const anchors = Object.values(this.room.snakes)
       .map((snake) => snake.body[0])
       .filter(Boolean);
@@ -411,7 +422,7 @@ export class SnakeRoom {
         value: isBonus ? 30 : 10,
         assetId: FOOD_IDS[Math.floor(Math.random() * FOOD_IDS.length)],
       };
-      if (occupied.has(pointKey(food))) continue;
+      if (this.segmentHit(food)) continue;
       if (this.room.foods.some((item) => same(item, food))) continue;
       this.room.foods.push(food);
       return;
@@ -431,18 +442,24 @@ export class SnakeRoom {
     return anchors[Math.floor(Math.random() * anchors.length)];
   }
 
-  occupiedPoints(plans = null) {
-    const occupied = new Set();
+  segmentHit(point, plans = null, playerId = "") {
     const hasPlans = Boolean(plans);
-    Object.entries(this.room.snakes).forEach(([playerId, snake]) => {
+    for (const [id, snake] of Object.entries(this.room.snakes)) {
       const bodyLength = hasPlans
-        ? plans[playerId]?.grows
+        ? plans[id]?.grows
           ? snake.body.length
           : Math.max(0, snake.body.length - 1)
         : snake.body.length;
-      snake.body.slice(0, bodyLength).forEach((part) => occupied.add(pointKey(part)));
-    });
-    return occupied;
+      const start = id === playerId ? Math.min(7, bodyLength) : 0;
+      for (let index = start; index < bodyLength; index += 1) {
+        if (same(point, snake.body[index])) return true;
+      }
+    }
+    return false;
+  }
+
+  foodIndexFor(head) {
+    return this.room.foods.findIndex((food) => distanceSquared(food, head) <= FOOD_PICKUP_RADIUS_SQUARED);
   }
 
   step() {
@@ -458,11 +475,12 @@ export class SnakeRoom {
     activeIds.forEach((playerId) => {
       const snake = this.room.snakes[playerId];
       const pending = this.pendingDirections.get(playerId);
-      if (pending && !opposite(snake.dir, pending)) snake.dir = pending;
+      if (pending) snake.dir = pending;
       this.pendingDirections.delete(playerId);
-      const dir = DIRS[snake.dir];
+      const dir = normalizeDirection(snake.dir) || DIRS.right;
+      snake.dir = dir;
       const head = { x: snake.body[0].x + dir.x, y: snake.body[0].y + dir.y };
-      const foodIndex = this.room.foods.findIndex((food) => same(food, head));
+      const foodIndex = this.foodIndexFor(head);
       plans[playerId] = {
         head,
         foodIndex,
@@ -470,18 +488,21 @@ export class SnakeRoom {
       };
     });
 
-    const occupied = this.occupiedPoints(plans);
     const deadIds = new Set();
-    const headCounts = new Map();
-    Object.entries(plans).forEach(([playerId, plan]) => {
-      if (!inBounds(plan.head) || occupied.has(pointKey(plan.head))) deadIds.add(playerId);
-      const key = pointKey(plan.head);
-      headCounts.set(key, [...(headCounts.get(key) || []), playerId]);
+    const planEntries = Object.entries(plans);
+    planEntries.forEach(([playerId, plan]) => {
+      if (!inBounds(plan.head) || this.segmentHit(plan.head, plans, playerId)) deadIds.add(playerId);
     });
-    headCounts.forEach((ids) => {
-      if (ids.length > 1) ids.forEach((id) => deadIds.add(id));
-    });
-
+    for (let first = 0; first < planEntries.length; first += 1) {
+      for (let second = first + 1; second < planEntries.length; second += 1) {
+        const [firstId, firstPlan] = planEntries[first];
+        const [secondId, secondPlan] = planEntries[second];
+        if (same(firstPlan.head, secondPlan.head)) {
+          deadIds.add(firstId);
+          deadIds.add(secondId);
+        }
+      }
+    }
     deadIds.forEach((playerId) => {
       this.room.players[playerId].alive = false;
       delete this.room.snakes[playerId];

@@ -1,8 +1,8 @@
 <script setup>
 import { computed, onMounted, onUnmounted, ref } from "vue";
+import { useRoute, useRouter } from "vue-router";
 import { ChevronDown, Settings, Maximize, Minimize } from "lucide-vue-next";
 import GameLayout from "../components/GameLayout.vue";
-import { createSwipeHandlers } from "../utils/touch";
 import { SNAKE_FOODS } from "../data/snakeFoods";
 import { SNAKE_SKINS, getSnakeSkinById } from "../data/snakeSkins";
 import { getBestScore, getSavedValue, setBestScore, setSavedValue } from "../utils/storage";
@@ -16,13 +16,17 @@ const paused = ref(false);
 const selectedSkinId = ref(getSavedValue("snake:skin", "cyber"));
 const selectedSkin = computed(() => getSnakeSkinById(selectedSkinId.value));
 const isFullscreen = ref(false);
+const gameEnded = ref(false);
+const route = useRoute();
+const router = useRouter();
+const homeTabIds = new Set(["featured", "all", "action", "puzzle", "strategy", "progress"]);
 
 const size = 840;
 const VIEWPORT_GRID = 24;
 const WORLD_SCALE = 10;
 const grid = VIEWPORT_GRID * WORLD_SCALE;
-const CELL_SIZE = size / VIEWPORT_GRID;
-const CAMERA_SMOOTHING = 0.34;
+const CELL_SIZE = 30;
+const CAMERA_SMOOTHING = 1;
 const FOOD_TARGET = 72;
 const LOCAL_FOOD_RATIO = 0.62;
 const CONTESTED_FOOD_RATIO = 0.18;
@@ -40,11 +44,28 @@ const LONG_SNAKE_LENGTH = 720;
 const LONG_SNAKE_EXACT_SEGMENTS = 260;
 const LONG_SNAKE_TAIL_KEEP_SEGMENTS = 24;
 const LONG_SNAKE_VISIBLE_BUDGET = 560;
+const HIT_RADIUS = 0.72;
+const FOOD_PICKUP_RADIUS = 0.86;
+const TOUCH_DIRECTION_DEADZONE = 14;
+const HIT_RADIUS_SQUARED = HIT_RADIUS * HIT_RADIUS;
+const FOOD_PICKUP_RADIUS_SQUARED = FOOD_PICKUP_RADIUS * FOOD_PICKUP_RADIUS;
 const dirs = {
   up: { x: 0, y: -1 },
   down: { x: 0, y: 1 },
   left: { x: -1, y: 0 },
   right: { x: 1, y: 0 },
+};
+const DIR_ENTRIES = Object.entries(dirs);
+const KEY_ACTIONS = {
+  ArrowUp: "up",
+  ArrowDown: "down",
+  ArrowLeft: "left",
+  ArrowRight: "right",
+  w: "up",
+  s: "down",
+  a: "left",
+  d: "right",
+  " ": "pause",
 };
 
 let ctx;
@@ -60,6 +81,8 @@ let camera = { x: 0, y: 0 };
 let cameraReady = false;
 let stateTick = 0;
 let spatialCache = createSpatialCache();
+let resizeObserver;
+let canvasSize = { width: size, height: size };
 const foodImages = new Map();
 let foodBag = [];
 let lastFoodId = "";
@@ -90,19 +113,56 @@ function nextFoodAsset() {
 }
 
 function same(a, b) {
-  return a.x === b.x && a.y === b.y;
+  return distanceSquared(a, b) <= HIT_RADIUS_SQUARED;
+}
+
+function distanceSquared(a, b) {
+  const dx = a.x - b.x;
+  const dy = a.y - b.y;
+  return dx * dx + dy * dy;
+}
+
+function normalizeDirection(dir) {
+  const length = Math.hypot(dir.x, dir.y);
+  if (!length) return dirs.right;
+  return {
+    x: dir.x / length,
+    y: dir.y / length,
+  };
 }
 
 function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
 }
 
-function allSegments() {
-  return [...player.body, ...aiSnakes.flatMap((snake) => snake.body)];
+function occupied(point) {
+  return segmentHit(point);
 }
 
-function occupied(point) {
-  return allSegments().some((part) => same(part, point));
+function segmentHit(point) {
+  for (let index = 0; index < (player?.body?.length || 0); index += 1) {
+    if (same(player.body[index], point)) return true;
+  }
+
+  for (const snake of aiSnakes || []) {
+    for (let index = 0; index < (snake.body?.length || 0); index += 1) {
+      if (same(snake.body[index], point)) return true;
+    }
+  }
+  return false;
+}
+
+function nearestFood(point) {
+  let closest = null;
+  let closestDistance = Infinity;
+  for (const food of foods || []) {
+    const nextDistance = Math.abs(food.x - point.x) + Math.abs(food.y - point.y);
+    if (nextDistance < closestDistance) {
+      closest = food;
+      closestDistance = nextDistance;
+    }
+  }
+  return closest;
 }
 
 function spawnFood() {
@@ -212,6 +272,7 @@ function restart() {
   spatialCache = createSpatialCache();
   score.value = 0;
   paused.value = false;
+  gameEnded.value = false;
   gameOver = false;
   status.value = "争夺能量核心";
   for (let i = 0; i < FOOD_TARGET; i += 1) spawnFood();
@@ -227,8 +288,41 @@ function restart() {
 function setDirection(name) {
   const dir = dirs[name];
   if (!dir || gameOver) return;
-  if (dir.x + direction.x === 0 && dir.y + direction.y === 0) return;
-  nextDirection = dir;
+  nextDirection = normalizeDirection(dir);
+}
+
+function setFreeDirectionFromPoint(clientX, clientY) {
+  if (!canvas.value || gameOver) return;
+  const rect = canvas.value.getBoundingClientRect();
+  const head = player?.body?.[0];
+  const headScreen = head
+    ? worldToScreen(head, camera)
+    : {
+        x: rect.width / 2,
+        y: rect.height / 2,
+      };
+  const dx = clientX - rect.left - headScreen.x;
+  const dy = clientY - rect.top - headScreen.y;
+  if (Math.hypot(dx, dy) < TOUCH_DIRECTION_DEADZONE) return;
+  nextDirection = normalizeDirection({ x: dx, y: dy });
+}
+
+function onTouchStart(event) {
+  const touch = event.touches[0];
+  if (!touch) return;
+  setFreeDirectionFromPoint(touch.clientX, touch.clientY);
+}
+
+function onTouchMove(event) {
+  const touch = event.touches[0];
+  if (!touch) return;
+  setFreeDirectionFromPoint(touch.clientX, touch.clientY);
+}
+
+function onTouchEnd(event) {
+  const touch = event.changedTouches[0];
+  if (!touch) return;
+  setFreeDirectionFromPoint(touch.clientX, touch.clientY);
 }
 
 function inBounds(point) {
@@ -259,46 +353,46 @@ function movePlayer() {
     x: player.body[0].x + direction.x,
     y: player.body[0].y + direction.y,
   };
-  const tail = player.body.at(-1);
-  const hitsSelf = player.body.slice(0, -1).some((part) => same(part, head));
+  const hitsSelf = player.body.slice(7).some((part) => same(part, head));
   const hitsAi = aiSnakes.some((snake) => snake.body.some((part) => same(part, head)));
   if (!inBounds(head) || hitsSelf || hitsAi) {
     gameOver = true;
-    status.value = "撞毁，点击重开";
+    gameEnded.value = true;
+    status.value = "本局结束";
     best.value = setBestScore("snake-arena", score.value);
     return;
   }
   player.body.unshift(head);
-  const foodIndex = foods.findIndex((food) => same(food, head));
+  const foodIndex = foods.findIndex((food) => distanceSquared(food, head) <= FOOD_PICKUP_RADIUS_SQUARED);
   if (foodIndex >= 0) {
     const [food] = foods.splice(foodIndex, 1);
     score.value += food.value;
     best.value = setBestScore("snake-arena", score.value);
     spawnFood();
-  } else if (!same(head, tail)) {
+  } else {
     player.body.pop();
   }
 }
 
 function chooseAiDirection(snake) {
   const head = snake.body[0];
-  const target = foods
-    .map((food) => ({ food, distance: Math.abs(food.x - head.x) + Math.abs(food.y - head.y) }))
-    .sort((a, b) => a.distance - b.distance)[0]?.food;
-  const options = Object.entries(dirs)
-    .filter(([, dir]) => {
-      const current = dirs[snake.dir];
-      return dir.x + current.x !== 0 || dir.y + current.y !== 0;
-    })
-    .map(([name, dir]) => {
-      const next = { x: head.x + dir.x, y: head.y + dir.y };
-      const blocked = !inBounds(next) || allSegments().some((part) => same(part, next));
-      const distance = target ? Math.abs(target.x - next.x) + Math.abs(target.y - next.y) : Math.random() * 10;
-      return { name, next, blocked, distance };
-    })
-    .filter((option) => !option.blocked)
-    .sort((a, b) => a.distance - b.distance);
-  return options[0]?.name || snake.dir;
+  const target = nearestFood(head);
+  const current = dirs[snake.dir];
+  let bestName = snake.dir;
+  let bestDistance = Infinity;
+
+  for (const [name, dir] of DIR_ENTRIES) {
+    if (dir.x + current.x === 0 && dir.y + current.y === 0) continue;
+    const next = { x: head.x + dir.x, y: head.y + dir.y };
+    if (!inBounds(next) || segmentHit(next)) continue;
+    const nextDistance = target ? Math.abs(target.x - next.x) + Math.abs(target.y - next.y) : Math.random() * 10;
+    if (nextDistance < bestDistance) {
+      bestName = name;
+      bestDistance = nextDistance;
+    }
+  }
+
+  return bestName;
 }
 
 function moveAi() {
@@ -311,13 +405,13 @@ function moveAi() {
     snake.dir = chooseAiDirection(snake);
     const dir = dirs[snake.dir];
     const head = { x: snake.body[0].x + dir.x, y: snake.body[0].y + dir.y };
-    const blocked = !inBounds(head) || allSegments().some((part) => same(part, head));
+    const blocked = !inBounds(head) || segmentHit(head);
     if (blocked) {
       killAi(snake);
       return;
     }
     snake.body.unshift(head);
-    const foodIndex = foods.findIndex((food) => same(food, head));
+    const foodIndex = foods.findIndex((food) => distanceSquared(food, head) <= FOOD_PICKUP_RADIUS_SQUARED);
     if (foodIndex >= 0) {
       foods.splice(foodIndex, 1);
       spawnFood();
@@ -345,30 +439,53 @@ function roundedRect(x, y, width, height, radius) {
 }
 
 function worldSize() {
-  return grid * CELL_SIZE;
+  return {
+    width: grid * CELL_SIZE,
+    height: grid * CELL_SIZE,
+  };
 }
 
-function targetCameraOffset() {
+function boardSize() {
+  if (!canvas.value) {
+    return { width: size, height: size };
+  }
+  const rect = canvas.value.getBoundingClientRect();
+  return {
+    width: Math.max(280, Math.floor(rect.width || size)),
+    height: Math.max(280, Math.floor(rect.height || size)),
+  };
+}
+
+function syncCanvasSize() {
+  if (canvas.value && (canvas.value.width !== canvasSize.width || canvas.value.height !== canvasSize.height)) {
+    canvas.value.width = canvasSize.width;
+    canvas.value.height = canvasSize.height;
+    cameraReady = false;
+  }
+  return canvasSize;
+}
+
+function targetCameraOffset(boardWidth, boardHeight) {
   const world = worldSize();
   const head = player?.body?.[0];
   const target = head
     ? {
-        x: head.x * CELL_SIZE + CELL_SIZE / 2 - size / 2,
-        y: head.y * CELL_SIZE + CELL_SIZE / 2 - size / 2,
+        x: head.x * CELL_SIZE + CELL_SIZE / 2 - boardWidth / 2,
+        y: head.y * CELL_SIZE + CELL_SIZE / 2 - boardHeight / 2,
       }
     : {
-        x: Math.max(0, (world - size) / 2),
-        y: Math.max(0, (world - size) / 2),
+        x: Math.max(0, (world.width - boardWidth) / 2),
+        y: Math.max(0, (world.height - boardHeight) / 2),
       };
 
   return {
-    x: clamp(target.x, 0, Math.max(0, world - size)),
-    y: clamp(target.y, 0, Math.max(0, world - size)),
+    x: clamp(target.x, 0, Math.max(0, world.width - boardWidth)),
+    y: clamp(target.y, 0, Math.max(0, world.height - boardHeight)),
   };
 }
 
-function cameraOffset() {
-  const target = targetCameraOffset();
+function cameraOffset(boardWidth, boardHeight) {
+  const target = targetCameraOffset(boardWidth, boardHeight);
   if (!cameraReady) {
     camera = target;
     cameraReady = true;
@@ -382,14 +499,14 @@ function cameraOffset() {
   return camera;
 }
 
-function isPointVisible(point, camera, padding = 2) {
+function isPointVisible(point, camera, boardWidth, boardHeight, padding = 2) {
   const x = point.x * CELL_SIZE;
   const y = point.y * CELL_SIZE;
   return (
     x >= camera.x - padding * CELL_SIZE &&
     y >= camera.y - padding * CELL_SIZE &&
-    x <= camera.x + size + padding * CELL_SIZE &&
-    y <= camera.y + size + padding * CELL_SIZE
+    x <= camera.x + boardWidth + padding * CELL_SIZE &&
+    y <= camera.y + boardHeight + padding * CELL_SIZE
   );
 }
 
@@ -422,11 +539,11 @@ function buildPointBuckets(points) {
   return buckets;
 }
 
-function queryBuckets(buckets, camera, padding = 2) {
+function queryBuckets(buckets, camera, boardWidth, boardHeight, padding = 2) {
   const left = Math.floor((camera.x / CELL_SIZE - padding) / SPATIAL_BUCKET_SIZE);
-  const right = Math.floor(((camera.x + size) / CELL_SIZE + padding) / SPATIAL_BUCKET_SIZE);
+  const right = Math.floor(((camera.x + boardWidth) / CELL_SIZE + padding) / SPATIAL_BUCKET_SIZE);
   const top = Math.floor((camera.y / CELL_SIZE - padding) / SPATIAL_BUCKET_SIZE);
-  const bottom = Math.floor(((camera.y + size) / CELL_SIZE + padding) / SPATIAL_BUCKET_SIZE);
+  const bottom = Math.floor(((camera.y + boardHeight) / CELL_SIZE + padding) / SPATIAL_BUCKET_SIZE);
   const items = [];
   for (let y = top; y <= bottom; y += 1) {
     for (let x = left; x <= right; x += 1) {
@@ -457,8 +574,10 @@ function cachedSnakeBuckets(snake, isPlayer) {
   return spatialCache.snakes.get(cacheKey);
 }
 
-function visibleFoods(camera) {
-  return queryBuckets(cachedFoodBuckets(), camera).filter((food) => isPointVisible(food, camera));
+function visibleFoods(camera, boardWidth, boardHeight) {
+  return queryBuckets(cachedFoodBuckets(), camera, boardWidth, boardHeight).filter((food) =>
+    isPointVisible(food, camera, boardWidth, boardHeight),
+  );
 }
 
 function worldToScreen(point, camera) {
@@ -529,14 +648,19 @@ function drawMinimapSnakeDensity(snake, skin, key, x, y, minimapSize) {
   });
 }
 
-function drawMinimap(camera) {
-  const minimapSize = Math.min(MINIMAP_SIZE, size * 0.24);
-  const x = size - minimapSize - MINIMAP_PADDING;
-  const y = size - minimapSize - MINIMAP_PADDING;
+function drawMinimap(camera, boardWidth, boardHeight) {
+  const minimapSize = Math.min(MINIMAP_SIZE, Math.min(boardWidth, boardHeight) * 0.34);
+  const x = boardWidth - minimapSize - MINIMAP_PADDING;
+  const y = boardHeight - minimapSize - MINIMAP_PADDING;
   const scale = minimapSize / grid;
-  const viewX = x + clamp(camera.x / CELL_SIZE, 0, grid) * scale;
-  const viewY = y + clamp(camera.y / CELL_SIZE, 0, grid) * scale;
-  const viewSize = VIEWPORT_GRID * scale;
+  const viewLeft = clamp(camera.x / CELL_SIZE, 0, grid);
+  const viewTop = clamp(camera.y / CELL_SIZE, 0, grid);
+  const viewRight = clamp((camera.x + boardWidth) / CELL_SIZE, viewLeft, grid);
+  const viewBottom = clamp((camera.y + boardHeight) / CELL_SIZE, viewTop, grid);
+  const viewX = x + viewLeft * scale;
+  const viewY = y + viewTop * scale;
+  const viewWidth = (viewRight - viewLeft) * scale;
+  const viewHeight = (viewBottom - viewTop) * scale;
 
   ctx.save();
   ctx.shadowBlur = 12;
@@ -575,25 +699,33 @@ function drawMinimap(camera) {
 
   ctx.strokeStyle = "rgba(83, 243, 255, 0.56)";
   ctx.lineWidth = 1;
-  ctx.strokeRect(viewX, viewY, viewSize, viewSize);
+  ctx.strokeRect(viewX, viewY, viewWidth, viewHeight);
   ctx.restore();
 }
 
-function drawEdgeHint(point, camera, color, radius = 7) {
+function drawEdgeHint(point, camera, boardWidth, boardHeight, color, radius = 7) {
   const screen = worldToScreen(point, camera);
   if (
     screen.x >= EDGE_HINT_PADDING &&
     screen.y >= EDGE_HINT_PADDING &&
-    screen.x <= size - EDGE_HINT_PADDING &&
-    screen.y <= size - EDGE_HINT_PADDING
+    screen.x <= boardWidth - EDGE_HINT_PADDING &&
+    screen.y <= boardHeight - EDGE_HINT_PADDING
   ) {
     return;
   }
 
-  const center = { x: size / 2, y: size / 2 };
+  const center = { x: boardWidth / 2, y: boardHeight / 2 };
   const angle = Math.atan2(screen.y - center.y, screen.x - center.x);
-  const x = clamp(center.x + Math.cos(angle) * (size / 2 - EDGE_HINT_DISTANCE), EDGE_HINT_PADDING, size - EDGE_HINT_PADDING);
-  const y = clamp(center.y + Math.sin(angle) * (size / 2 - EDGE_HINT_DISTANCE), EDGE_HINT_PADDING, size - EDGE_HINT_PADDING);
+  const x = clamp(
+    center.x + Math.cos(angle) * (boardWidth / 2 - EDGE_HINT_DISTANCE),
+    EDGE_HINT_PADDING,
+    boardWidth - EDGE_HINT_PADDING,
+  );
+  const y = clamp(
+    center.y + Math.sin(angle) * (boardHeight / 2 - EDGE_HINT_DISTANCE),
+    EDGE_HINT_PADDING,
+    boardHeight - EDGE_HINT_PADDING,
+  );
 
   ctx.save();
   ctx.translate(x, y);
@@ -610,20 +742,31 @@ function drawEdgeHint(point, camera, color, radius = 7) {
   ctx.restore();
 }
 
-function drawEdgeHints(camera) {
-  [...foods]
-    .sort((a, b) => b.value - a.value)
-    .slice(0, 8)
-    .forEach((food) => drawEdgeHint(food, camera, food.value > 10 ? "#facc15" : "#ffd166", 5));
+function edgeHintFoods(limit = 8) {
+  const bestFoods = [];
+  for (const food of foods || []) {
+    const insertAt = bestFoods.findIndex((item) => food.value > item.value);
+    if (insertAt >= 0) {
+      bestFoods.splice(insertAt, 0, food);
+    } else if (bestFoods.length < limit) {
+      bestFoods.push(food);
+    }
+    if (bestFoods.length > limit) bestFoods.length = limit;
+  }
+  return bestFoods;
+}
+
+function drawEdgeHints(camera, boardWidth, boardHeight) {
+  edgeHintFoods().forEach((food) => drawEdgeHint(food, camera, boardWidth, boardHeight, food.value > 10 ? "#facc15" : "#ffd166", 5));
 
   aiSnakes.forEach((snake) => {
     const head = snake.body?.[0];
     if (!head) return;
-    drawEdgeHint(head, camera, getSnakeSkinById(snake.skinId).head, 7);
+    drawEdgeHint(head, camera, boardWidth, boardHeight, getSnakeSkinById(snake.skinId).head, 7);
   });
 }
 
-function drawBoundaryWarning() {
+function drawBoundaryWarning(boardWidth, boardHeight) {
   const head = player?.body?.[0];
   if (!head) return;
   const distance = Math.min(head.x, head.y, grid - 1 - head.x, grid - 1 - head.y);
@@ -634,7 +777,7 @@ function drawBoundaryWarning() {
   ctx.globalAlpha = 0.18 + alpha * 0.34;
   ctx.strokeStyle = "#facc15";
   ctx.lineWidth = 8;
-  ctx.strokeRect(4, 4, size - 8, size - 8);
+  ctx.strokeRect(4, 4, boardWidth - 8, boardHeight - 8);
   ctx.restore();
 }
 
@@ -881,13 +1024,13 @@ function drawFood(food, cell) {
   ctx.restore();
 }
 
-function drawSnake(snake, isPlayer = false, cameraView = camera) {
+function drawSnake(snake, isPlayer = false, cameraView = camera, boardWidth = size, boardHeight = size) {
   const skin = isPlayer ? selectedSkin.value : getSnakeSkinById(snake.skinId);
   const dir = isPlayer ? direction : dirs[snake.dir];
   const buckets = cachedSnakeBuckets(snake, isPlayer);
   const bodyLength = snake.body?.length || 0;
-  const parts = queryBuckets(buckets, cameraView)
-    .filter((part) => isPointVisible(part, cameraView))
+  const parts = queryBuckets(buckets, cameraView, boardWidth, boardHeight)
+    .filter((part) => isPointVisible(part, cameraView, boardWidth, boardHeight))
     .sort((a, b) => b.index - a.index);
   clipVisibleSnakeParts(parts, bodyLength).forEach((part) => {
     drawSnakePart(part, part.index, CELL_SIZE, skin, dir, shouldSimplifySnakePart(part.index, bodyLength));
@@ -896,11 +1039,12 @@ function drawSnake(snake, isPlayer = false, cameraView = camera) {
 
 function draw() {
   if (!ctx) return;
-  const camera = cameraOffset();
+  const { width: boardWidth, height: boardHeight } = syncCanvasSize();
+  const camera = cameraOffset(boardWidth, boardHeight);
   const world = worldSize();
-  ctx.clearRect(0, 0, size, size);
+  ctx.clearRect(0, 0, boardWidth, boardHeight);
   ctx.fillStyle = "#020611";
-  ctx.fillRect(0, 0, size, size);
+  ctx.fillRect(0, 0, boardWidth, boardHeight);
 
   ctx.save();
   ctx.translate(-camera.x, -camera.y);
@@ -908,35 +1052,35 @@ function draw() {
   ctx.strokeStyle = "rgba(83, 243, 255, 0.06)";
   ctx.lineWidth = 1;
   const startCol = Math.max(0, Math.floor(camera.x / CELL_SIZE) - 1);
-  const endCol = Math.min(grid, Math.ceil((camera.x + size) / CELL_SIZE) + 1);
+  const endCol = Math.min(grid, Math.ceil((camera.x + boardWidth) / CELL_SIZE) + 1);
   const startRow = Math.max(0, Math.floor(camera.y / CELL_SIZE) - 1);
-  const endRow = Math.min(grid, Math.ceil((camera.y + size) / CELL_SIZE) + 1);
+  const endRow = Math.min(grid, Math.ceil((camera.y + boardHeight) / CELL_SIZE) + 1);
   for (let i = startCol; i <= endCol; i += 1) {
     const pos = i * CELL_SIZE;
     ctx.beginPath();
     ctx.moveTo(pos, Math.max(0, camera.y - CELL_SIZE * 2));
-    ctx.lineTo(pos, Math.min(world, camera.y + size + CELL_SIZE * 2));
+    ctx.lineTo(pos, Math.min(world.height, camera.y + boardHeight + CELL_SIZE * 2));
     ctx.stroke();
   }
   for (let i = startRow; i <= endRow; i += 1) {
     const pos = i * CELL_SIZE;
     ctx.beginPath();
     ctx.moveTo(Math.max(0, camera.x - CELL_SIZE * 2), pos);
-    ctx.lineTo(Math.min(world, camera.x + size + CELL_SIZE * 2), pos);
+    ctx.lineTo(Math.min(world.width, camera.x + boardWidth + CELL_SIZE * 2), pos);
     ctx.stroke();
   }
 
   ctx.strokeStyle = "rgba(255, 209, 102, 0.28)";
   ctx.lineWidth = 4;
-  ctx.strokeRect(0, 0, world, world);
+  ctx.strokeRect(0, 0, world.width, world.height);
 
-  visibleFoods(camera).forEach((food) => drawFood(food, CELL_SIZE));
-  drawSnake(player, true, camera);
-  aiSnakes.forEach((snake) => drawSnake(snake, false, camera));
+  visibleFoods(camera, boardWidth, boardHeight).forEach((food) => drawFood(food, CELL_SIZE));
+  drawSnake(player, true, camera, boardWidth, boardHeight);
+  aiSnakes.forEach((snake) => drawSnake(snake, false, camera, boardWidth, boardHeight));
   ctx.restore();
-  drawBoundaryWarning();
-  drawEdgeHints(camera);
-  drawMinimap(camera);
+  drawBoundaryWarning(boardWidth, boardHeight);
+  drawEdgeHints(camera, boardWidth, boardHeight);
+  drawMinimap(camera, boardWidth, boardHeight);
   ctx.shadowBlur = 0;
 }
 
@@ -951,16 +1095,11 @@ function loop(time) {
 
 function resize() {
   if (!canvas.value) return;
-  const parent = canvas.value.parentElement;
-  if (!parent) return;
-
-  // 全屏模式下使用整个视口，保持正方形
-  const maxSize = isFullscreen.value
-    ? Math.min(window.innerWidth, window.innerHeight) - 16
-    : Math.min(parent.clientWidth - 8, parent.clientHeight - 8);
-  const displaySize = Math.max(280, maxSize);
-  canvas.value.style.width = `${displaySize}px`;
-  canvas.value.style.height = `${displaySize}px`;
+  canvas.value.style.width = "100%";
+  canvas.value.style.height = "100%";
+  canvasSize = boardSize();
+  syncCanvasSize();
+  draw();
 }
 
 function togglePause() {
@@ -969,26 +1108,19 @@ function togglePause() {
   status.value = paused.value ? "已暂停" : "继续争夺能量核心";
 }
 
+function exitGame() {
+  if (isFullscreen.value) exitFullscreen();
+  const fromTab = Array.isArray(route.query.fromTab) ? route.query.fromTab[0] : route.query.fromTab;
+  router.push(typeof fromTab === "string" && homeTabIds.has(fromTab) ? { path: "/", query: { tab: fromTab } } : "/");
+}
+
 function onKey(event) {
-  const map = {
-    ArrowUp: "up",
-    ArrowDown: "down",
-    ArrowLeft: "left",
-    ArrowRight: "right",
-    w: "up",
-    s: "down",
-    a: "left",
-    d: "right",
-    " ": "pause",
-  };
-  const action = map[event.key];
+  const action = KEY_ACTIONS[event.key];
   if (!action) return;
   event.preventDefault();
   if (action === "pause") togglePause();
   else setDirection(action);
 }
-
-const swipe = createSwipeHandlers(setDirection);
 
 onMounted(() => {
   ctx = canvas.value.getContext("2d");
@@ -996,6 +1128,8 @@ onMounted(() => {
   canvas.value.height = size;
   restart();
   resize();
+  resizeObserver = new ResizeObserver(resize);
+  resizeObserver.observe(canvas.value.parentElement);
   window.addEventListener("resize", resize);
   window.addEventListener("keydown", onKey);
   document.addEventListener("fullscreenchange", onFullscreenChange);
@@ -1007,6 +1141,7 @@ onMounted(() => {
 
 onUnmounted(() => {
   cancelAnimationFrame(loopId);
+  resizeObserver?.disconnect();
   window.removeEventListener("resize", resize);
   window.removeEventListener("keydown", onKey);
   document.removeEventListener("fullscreenchange", onFullscreenChange);
@@ -1040,10 +1175,9 @@ onUnmounted(() => {
       </button>
       <div
         class="board-shell arena-board-shell"
-        @click="gameOver && restart()"
-        @touchstart.passive="swipe.onTouchStart"
-        @touchend.passive="swipe.onTouchEnd"
-        @touchmove.prevent
+        @touchstart.prevent="onTouchStart"
+        @touchmove.prevent="onTouchMove"
+        @touchend.prevent="onTouchEnd"
       >
         <details
           class="arena-skin-drawer"
@@ -1075,6 +1209,20 @@ onUnmounted(() => {
           </div>
         </details>
         <canvas ref="canvas" class="canvas-board arena-canvas" aria-label="贪吃蛇大作战游戏画布"></canvas>
+        <div v-if="gameEnded" class="arena-death-backdrop" role="dialog" aria-modal="true" aria-label="游戏结束">
+          <section class="arena-death-modal">
+            <p>本局结束</p>
+            <h2>撞毁了</h2>
+            <div class="arena-death-stats">
+              <span>分数 <strong>{{ score }}</strong></span>
+              <span>最佳 <strong>{{ best }}</strong></span>
+            </div>
+            <div class="arena-death-actions">
+              <button class="pill-button primary" type="button" @click="restart">重开</button>
+              <button class="pill-button" type="button" @click="exitGame">退出</button>
+            </div>
+          </section>
+        </div>
       </div>
     </section>
   </GameLayout>
@@ -1106,7 +1254,7 @@ onUnmounted(() => {
   height: 100vh;
   z-index: 9999;
   background: #020611;
-  padding: 12px;
+  padding: 0;
   margin: 0;
   display: flex;
   align-items: center;
@@ -1149,11 +1297,23 @@ onUnmounted(() => {
 }
 
 .is-fullscreen .arena-board-shell {
+  border: 0;
+  border-radius: 0;
   padding: 0;
 }
 
 .arena-canvas {
-  aspect-ratio: 1;
+  display: block;
+  width: 100%;
+  height: 100%;
+  max-height: none;
+  min-height: 0;
+}
+
+.is-fullscreen .arena-canvas {
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
 }
 
 .arena-skin-drawer {
@@ -1202,6 +1362,78 @@ onUnmounted(() => {
 
 .arena-skin-drawer[open] .drawer-chevron {
   transform: rotate(180deg);
+}
+
+.arena-death-backdrop {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  display: grid;
+  place-items: center;
+  padding: 18px;
+  background:
+    radial-gradient(circle at 50% 42%, rgba(255, 92, 124, 0.18), transparent 38%),
+    rgba(2, 6, 17, 0.68);
+  backdrop-filter: blur(5px);
+}
+
+.arena-death-modal {
+  width: min(320px, 100%);
+  padding: 20px;
+  border: 1px solid rgba(145, 235, 255, 0.28);
+  border-radius: var(--radius);
+  background: rgba(6, 13, 28, 0.94);
+  box-shadow:
+    0 22px 58px rgba(0, 0, 0, 0.42),
+    inset 0 0 28px rgba(83, 243, 255, 0.08);
+  text-align: center;
+}
+
+.arena-death-modal p,
+.arena-death-modal h2 {
+  margin: 0;
+}
+
+.arena-death-modal p {
+  color: var(--danger);
+  font-size: 0.82rem;
+  font-weight: 900;
+}
+
+.arena-death-modal h2 {
+  margin-top: 6px;
+  font-size: 1.55rem;
+}
+
+.arena-death-stats {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 16px;
+}
+
+.arena-death-stats span {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid rgba(145, 235, 255, 0.18);
+  border-radius: var(--radius);
+  background: rgba(3, 8, 18, 0.52);
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
+.arena-death-stats strong {
+  color: var(--cyan);
+  font-size: 1.15rem;
+}
+
+.arena-death-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 16px;
 }
 
 .arena-skin-grid {
@@ -1264,10 +1496,6 @@ onUnmounted(() => {
 
   :global(.snake-arena-layout .game-content) {
     padding: 4px;
-  }
-
-  .arena-play-panel.is-fullscreen {
-    padding: 8px;
   }
 
   .fullscreen-toggle {

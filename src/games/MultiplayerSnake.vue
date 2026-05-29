@@ -21,7 +21,6 @@ import snakeArenaIcon from "../assets/icons/snake-arena.svg";
 import { SNAKE_FOODS } from "../data/snakeFoods";
 import { getSnakeSkinById } from "../data/snakeSkins";
 import { getSavedValue } from "../utils/storage";
-import { createSwipeHandlers } from "../utils/touch";
 
 const props = defineProps({
   roomCode: {
@@ -40,14 +39,12 @@ const copied = ref(false);
 const serverError = ref("");
 const isFullscreen = ref(false);
 
-const CELL_SIZE = 35;
+const CELL_SIZE = 30;
 const DEFAULT_GRID_WIDTH = 36;
 const DEFAULT_GRID_HEIGHT = 24;
 const DEFAULT_VIEWPORT_COLS = 36;
 const DEFAULT_VIEWPORT_ROWS = 24;
-const MIN_VIEWPORT_COLS = 22;
-const MIN_VIEWPORT_ROWS = 16;
-const CAMERA_SMOOTHING = 0.34;
+const CAMERA_SMOOTHING = 1;
 const MINIMAP_WIDTH = 154;
 const MINIMAP_HEIGHT = 104;
 const MINIMAP_PADDING = 12;
@@ -61,11 +58,23 @@ const LONG_SNAKE_TAIL_KEEP_SEGMENTS = 24;
 const LONG_SNAKE_VISIBLE_BUDGET = 560;
 const MINIMAP_DENSITY_CELL = 4;
 const MINIMAP_DENSITY_SAMPLE_TARGET = 1100;
+const TOUCH_DIRECTION_DEADZONE = 14;
+const INPUT_SEND_INTERVAL = 50;
 const dirs = {
   up: { x: 0, y: -1 },
   down: { x: 0, y: 1 },
   left: { x: -1, y: 0 },
   right: { x: 1, y: 0 },
+};
+const KEY_DIRECTIONS = {
+  ArrowUp: "up",
+  ArrowDown: "down",
+  ArrowLeft: "left",
+  ArrowRight: "right",
+  w: "up",
+  s: "down",
+  a: "left",
+  d: "right",
 };
 const foodAssets = new Map(SNAKE_FOODS.map((food) => [food.id, food]));
 const foodImages = new Map();
@@ -73,11 +82,13 @@ const foodImages = new Map();
 let ctx;
 let socket;
 let resizeObserver;
-let lastDirection = "";
+let lastDirection = null;
+let lastInputAt = 0;
 let camera = { x: 0, y: 0 };
 let cameraReady = false;
 let animationFrameId = 0;
 let spatialCache = createSpatialCache();
+let canvasSize = { width: DEFAULT_VIEWPORT_COLS * CELL_SIZE, height: DEFAULT_VIEWPORT_ROWS * CELL_SIZE };
 
 const safeRoomCode = computed(() => props.roomCode.trim().toUpperCase());
 const players = computed(() => room.value?.players || []);
@@ -133,7 +144,10 @@ function connect() {
     }
     if (message.type === "room") {
       serverError.value = "";
-      if (room.value?.phase !== message.state?.phase) cameraReady = false;
+      if (room.value?.phase !== message.state?.phase) {
+        cameraReady = false;
+        lastDirection = null;
+      }
       room.value = message.state;
       nextTick(() => {
         resize();
@@ -178,24 +192,76 @@ function reconnect() {
   connect();
 }
 
+function normalizeDirection(dir) {
+  const value = typeof dir === "string" ? dirs[dir] : dir;
+  const x = Number(value?.x);
+  const y = Number(value?.y);
+  const length = Math.hypot(x, y);
+  if (!Number.isFinite(length) || length <= 0) return null;
+  return {
+    x: x / length,
+    y: y / length,
+  };
+}
+
+function directionChanged(next, threshold = 0.018) {
+  if (!lastDirection) return true;
+  return Math.abs(next.x - lastDirection.x) > threshold || Math.abs(next.y - lastDirection.y) > threshold;
+}
+
+function sendDirection(dir, force = false) {
+  const next = normalizeDirection(dir);
+  if (!next) return;
+  const now = performance.now();
+  if (!force && now - lastInputAt < INPUT_SEND_INTERVAL) return;
+  if (!force && !directionChanged(next)) return;
+  lastDirection = next;
+  lastInputAt = now;
+  send({ type: "input", direction: next });
+}
+
 function setDirection(name) {
-  if (!dirs[name] || lastDirection === name) return;
-  lastDirection = name;
-  send({ type: "input", direction: name });
+  if (!dirs[name]) return;
+  sendDirection(dirs[name], true);
+}
+
+function setFreeDirectionFromPoint(clientX, clientY, force = false) {
+  const target = canvas.value;
+  if (!target || room.value?.phase !== "playing" || !ownPlayer.value?.alive) return;
+  const rect = target.getBoundingClientRect();
+  const head = ownSnake()?.body?.[0];
+  const headScreen = head
+    ? worldToScreen(head, camera, CELL_SIZE)
+    : {
+        x: rect.width / 2,
+        y: rect.height / 2,
+      };
+  const dx = clientX - rect.left - headScreen.x;
+  const dy = clientY - rect.top - headScreen.y;
+  if (Math.hypot(dx, dy) < TOUCH_DIRECTION_DEADZONE) return;
+  sendDirection({ x: dx, y: dy }, force);
+}
+
+function onTouchStart(event) {
+  const touch = event.touches[0];
+  if (!touch) return;
+  setFreeDirectionFromPoint(touch.clientX, touch.clientY, true);
+}
+
+function onTouchMove(event) {
+  const touch = event.touches[0];
+  if (!touch) return;
+  setFreeDirectionFromPoint(touch.clientX, touch.clientY);
+}
+
+function onTouchEnd(event) {
+  const touch = event.changedTouches[0];
+  if (!touch) return;
+  setFreeDirectionFromPoint(touch.clientX, touch.clientY, true);
 }
 
 function onKey(event) {
-  const map = {
-    ArrowUp: "up",
-    ArrowDown: "down",
-    ArrowLeft: "left",
-    ArrowRight: "right",
-    w: "up",
-    s: "down",
-    a: "left",
-    d: "right",
-  };
-  const direction = map[event.key];
+  const direction = KEY_DIRECTIONS[event.key];
   if (!direction) return;
   event.preventDefault();
   setDirection(direction);
@@ -266,12 +332,12 @@ function resize() {
 
   const availableWidth = Math.max(260, parent.clientWidth - 12);
   const availableHeight = Math.max(220, parent.clientHeight - 12);
-  const boardRatio = availableWidth / availableHeight;
-  const width = Math.floor(availableWidth);
-  const height = Math.floor(availableWidth / boardRatio);
-
-  target.style.width = `${width}px`;
-  target.style.height = `${height}px`;
+  target.style.width = "100%";
+  target.style.height = "100%";
+  canvasSize = {
+    width: Math.floor(availableWidth),
+    height: Math.floor(availableHeight),
+  };
   syncCanvasSize();
   draw();
 }
@@ -289,23 +355,7 @@ function gridSize() {
 }
 
 function boardSize() {
-  const target = canvas.value;
-  const parent = target?.parentElement;
-  if (parent) {
-    const availableWidth = Math.max(260, parent.clientWidth - 12);
-    const availableHeight = Math.max(220, parent.clientHeight - 12);
-    const viewportCols = Math.max(MIN_VIEWPORT_COLS, Math.round(availableWidth / CELL_SIZE));
-    const viewportRows = Math.max(MIN_VIEWPORT_ROWS, Math.round(availableHeight / CELL_SIZE));
-    return {
-      width: viewportCols * CELL_SIZE,
-      height: viewportRows * CELL_SIZE,
-    };
-  }
-
-  return {
-    width: DEFAULT_VIEWPORT_COLS * CELL_SIZE,
-    height: DEFAULT_VIEWPORT_ROWS * CELL_SIZE,
-  };
+  return canvasSize;
 }
 
 function syncCanvasSize() {
@@ -640,11 +690,22 @@ function drawEdgeHint(point, camera, boardWidth, boardHeight, cell, color, radiu
   ctx.restore();
 }
 
+function edgeHintFoods(limit = 8) {
+  const bestFoods = [];
+  for (const food of room.value?.foods || []) {
+    const insertAt = bestFoods.findIndex((item) => food.value > item.value);
+    if (insertAt >= 0) {
+      bestFoods.splice(insertAt, 0, food);
+    } else if (bestFoods.length < limit) {
+      bestFoods.push(food);
+    }
+    if (bestFoods.length > limit) bestFoods.length = limit;
+  }
+  return bestFoods;
+}
+
 function drawEdgeHints(camera, boardWidth, boardHeight, cell) {
-  const foods = [...(room.value?.foods || [])]
-    .sort((a, b) => b.value - a.value)
-    .slice(0, 8);
-  foods.forEach((food) => drawEdgeHint(food, camera, boardWidth, boardHeight, cell, food.value > 10 ? "#facc15" : "#ffd166", 5));
+  edgeHintFoods().forEach((food) => drawEdgeHint(food, camera, boardWidth, boardHeight, cell, food.value > 10 ? "#facc15" : "#ffd166", 5));
 
   Object.values(room.value?.snakes || {}).forEach((snake) => {
     if (snake.playerId === selfId.value) return;
@@ -783,7 +844,7 @@ function drawSnake(snake, camera, boardWidth, boardHeight) {
   const player = players.value.find((item) => item.id === snake.playerId);
   const skin = getSnakeSkinById(player?.skinId || "cyber");
   const cell = CELL_SIZE;
-  const dir = dirs[snake.dir] || dirs.right;
+  const dir = normalizeDirection(snake.dir) || dirs.right;
   const buckets = cachedSnakeBuckets(snake);
   const parts = queryBuckets(buckets, camera, boardWidth, boardHeight, cell)
     .filter((part) => isPointVisible(part, camera, boardWidth, boardHeight, cell))
@@ -876,8 +937,6 @@ function stopRenderLoop() {
   animationFrameId = 0;
 }
 
-const swipe = createSwipeHandlers(setDirection);
-
 onMounted(() => {
   ctx = canvas.value.getContext("2d");
   syncCanvasSize();
@@ -968,9 +1027,9 @@ watch(room, () => draw(), { deep: true });
           </button>
           <div
             class="board-shell multiplayer-board-shell"
-            @touchstart.passive="swipe.onTouchStart"
-            @touchend.passive="swipe.onTouchEnd"
-            @touchmove.prevent
+            @touchstart.prevent="onTouchStart"
+            @touchend.prevent="onTouchEnd"
+            @touchmove.prevent="onTouchMove"
           >
             <canvas ref="canvas" class="canvas-board multiplayer-canvas" aria-label="多人贪吃蛇游戏画布"></canvas>
             <div v-if="room?.phase !== 'playing'" class="room-overlay">
@@ -1115,8 +1174,20 @@ watch(room, () => draw(), { deep: true });
 }
 
 .multiplayer-canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
   max-width: 100%;
-  max-height: 100%;
+  max-height: none;
+  min-height: 0;
+}
+
+.is-fullscreen .multiplayer-board-shell {
+  border-radius: 0;
+}
+
+.is-fullscreen .multiplayer-canvas {
+  box-shadow: none;
 }
 
 .room-overlay {
