@@ -15,6 +15,14 @@ const explosion = ref(null);
 let animationId = 0;
 let lastTime = 0;
 let spawnTimer = 0;
+const ROCK_MIN_SIZE = 2.2;
+const ROCK_MAX_SIZE = 7.6;
+const ROCK_MIN_SPEED = 0.72;
+const ROCK_MAX_SPEED = 1.85;
+
+function randomBetween(min, max) {
+  return min + Math.random() * (max - min);
+}
 
 // 生成星空背景
 function generateStars() {
@@ -94,14 +102,15 @@ function update(currentTime) {
   if (spawnTimer > 280) {
     spawnTimer = 0;
     if (Math.random() < 0.85) {
+      const size = randomBetween(ROCK_MIN_SIZE, ROCK_MAX_SIZE);
       rocks.value.push({
         id: Date.now() + Math.random(),
         x: 5 + Math.random() * 90,
         y: -5,
-        size: 3 + Math.random() * 4,
-        speed: 1.5 + Math.random() * 1.8,
+        size,
+        speed: randomBetween(ROCK_MIN_SPEED, ROCK_MAX_SPEED),
         rotation: Math.random() * 360,
-        rotationSpeed: (Math.random() - 0.5) * 8,
+        rotationSpeed: randomBetween(-4.8, 4.8) * (ROCK_MAX_SIZE / size),
       });
     }
   }
