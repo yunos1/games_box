@@ -40,8 +40,9 @@ const copied = ref(false);
 const serverError = ref("");
 const isFullscreen = ref(false);
 
-const SIZE = 840;
-const DEFAULT_GRID = 24;
+const CELL_SIZE = 35;
+const DEFAULT_GRID_WIDTH = 36;
+const DEFAULT_GRID_HEIGHT = 24;
 const dirs = {
   up: { x: 0, y: -1 },
   down: { x: 0, y: 1 },
@@ -111,7 +112,10 @@ function connect() {
     if (message.type === "room") {
       serverError.value = "";
       room.value = message.state;
-      nextTick(draw);
+      nextTick(() => {
+        resize();
+        draw();
+      });
     }
     if (message.type === "error") {
       serverError.value = message.message || "房间操作失败";
@@ -235,13 +239,41 @@ function resize() {
   const parent = target.parentElement;
   if (!parent) return;
 
-  // 全屏模式下使用整个视口，保持正方形
-  const maxSize = isFullscreen.value
-    ? Math.min(window.innerWidth, window.innerHeight) - 16
-    : Math.min(parent.clientWidth - 12, parent.clientHeight - 12);
-  const displaySize = Math.max(260, maxSize);
-  target.style.width = `${displaySize}px`;
-  target.style.height = `${displaySize}px`;
+  const { width: boardWidth, height: boardHeight } = boardSize();
+  const availableWidth = Math.max(260, parent.clientWidth - 12);
+  const availableHeight = Math.max(220, parent.clientHeight - 12);
+  const scale = Math.min(availableWidth / boardWidth, availableHeight / boardHeight);
+  target.style.width = `${Math.floor(boardWidth * scale)}px`;
+  target.style.height = `${Math.floor(boardHeight * scale)}px`;
+}
+
+function gridSize() {
+  const state = room.value;
+  if (!state) {
+    return { width: DEFAULT_GRID_WIDTH, height: DEFAULT_GRID_HEIGHT };
+  }
+  const legacyGrid = state.grid || DEFAULT_GRID_HEIGHT;
+  return {
+    width: state.gridWidth || legacyGrid,
+    height: state.gridHeight || legacyGrid,
+  };
+}
+
+function boardSize() {
+  const grid = gridSize();
+  return {
+    width: grid.width * CELL_SIZE,
+    height: grid.height * CELL_SIZE,
+  };
+}
+
+function syncCanvasSize() {
+  const size = boardSize();
+  if (canvas.value && (canvas.value.width !== size.width || canvas.value.height !== size.height)) {
+    canvas.value.width = size.width;
+    canvas.value.height = size.height;
+  }
+  return size;
 }
 
 function roundedRect(x, y, width, height, radius) {
@@ -333,8 +365,7 @@ function drawSnakePart(part, index, cell, skin, dir, faded) {
 function drawSnake(snake) {
   const player = players.value.find((item) => item.id === snake.playerId);
   const skin = getSnakeSkinById(player?.skinId || "cyber");
-  const grid = room.value?.grid || DEFAULT_GRID;
-  const cell = SIZE / grid;
+  const cell = CELL_SIZE;
   const dir = dirs[snake.dir] || dirs.right;
   [...snake.body].reverse().forEach((part, reversedIndex) => {
     drawSnakePart(part, snake.body.length - 1 - reversedIndex, cell, skin, dir, !player?.connected);
@@ -343,19 +374,25 @@ function drawSnake(snake) {
 
 function draw() {
   if (!ctx) return;
-  const grid = room.value?.grid || DEFAULT_GRID;
-  const cell = SIZE / grid;
-  ctx.clearRect(0, 0, SIZE, SIZE);
+  const grid = gridSize();
+  const { width: boardWidth, height: boardHeight } = syncCanvasSize();
+  const cell = CELL_SIZE;
+  ctx.clearRect(0, 0, boardWidth, boardHeight);
   ctx.fillStyle = "#020611";
-  ctx.fillRect(0, 0, SIZE, SIZE);
+  ctx.fillRect(0, 0, boardWidth, boardHeight);
   ctx.strokeStyle = "rgba(83, 243, 255, 0.06)";
-  for (let i = 0; i <= grid; i += 1) {
-    const pos = i * cell;
+  for (let i = 0; i <= grid.width; i += 1) {
+    const x = i * cell;
     ctx.beginPath();
-    ctx.moveTo(pos, 0);
-    ctx.lineTo(pos, SIZE);
-    ctx.moveTo(0, pos);
-    ctx.lineTo(SIZE, pos);
+    ctx.moveTo(x, 0);
+    ctx.lineTo(x, boardHeight);
+    ctx.stroke();
+  }
+  for (let i = 0; i <= grid.height; i += 1) {
+    const y = i * cell;
+    ctx.beginPath();
+    ctx.moveTo(0, y);
+    ctx.lineTo(boardWidth, y);
     ctx.stroke();
   }
 
@@ -368,8 +405,7 @@ const swipe = createSwipeHandlers(setDirection);
 
 onMounted(() => {
   ctx = canvas.value.getContext("2d");
-  canvas.value.width = SIZE;
-  canvas.value.height = SIZE;
+  syncCanvasSize();
   connect();
   resize();
   resizeObserver = new ResizeObserver(resize);
@@ -603,7 +639,6 @@ watch(room, () => draw(), { deep: true });
 }
 
 .multiplayer-canvas {
-  width: min(100cqw, 100cqh) !important;
   max-width: 100%;
   max-height: 100%;
 }

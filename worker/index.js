@@ -1,8 +1,9 @@
-const GRID = 24;
+const GRID_WIDTH = 36;
+const GRID_HEIGHT = 24;
 const MAX_PLAYERS = 6;
 const MIN_PLAYERS = 2;
 const TICK_MS = 115;
-const FOOD_TARGET = 12;
+const FOOD_TARGET = 16;
 const ROOM_CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 const VALID_DIRECTIONS = new Set(["up", "down", "left", "right"]);
 const SKIN_IDS = new Set(["cyber", "lava", "frost", "jungle", "royal", "candy", "galaxy", "jade", "tiger", "ghost"]);
@@ -38,11 +39,11 @@ const DIRS = {
 
 const STARTS = [
   { dir: "right", body: [{ x: 4, y: 5 }, { x: 3, y: 5 }, { x: 2, y: 5 }] },
-  { dir: "left", body: [{ x: 19, y: 18 }, { x: 20, y: 18 }, { x: 21, y: 18 }] },
-  { dir: "down", body: [{ x: 6, y: 18 }, { x: 6, y: 17 }, { x: 6, y: 16 }] },
-  { dir: "up", body: [{ x: 17, y: 6 }, { x: 17, y: 7 }, { x: 17, y: 8 }] },
+  { dir: "left", body: [{ x: 31, y: 18 }, { x: 32, y: 18 }, { x: 33, y: 18 }] },
+  { dir: "down", body: [{ x: 8, y: 18 }, { x: 8, y: 17 }, { x: 8, y: 16 }] },
+  { dir: "up", body: [{ x: 27, y: 6 }, { x: 27, y: 7 }, { x: 27, y: 8 }] },
   { dir: "right", body: [{ x: 4, y: 12 }, { x: 3, y: 12 }, { x: 2, y: 12 }] },
-  { dir: "left", body: [{ x: 19, y: 11 }, { x: 20, y: 11 }, { x: 21, y: 11 }] },
+  { dir: "left", body: [{ x: 31, y: 11 }, { x: 32, y: 11 }, { x: 33, y: 11 }] },
 ];
 
 function json(data, init = {}) {
@@ -82,7 +83,9 @@ function createRoomState(roomCode) {
   return {
     roomCode,
     phase: "lobby",
-    grid: GRID,
+    grid: GRID_HEIGHT,
+    gridWidth: GRID_WIDTH,
+    gridHeight: GRID_HEIGHT,
     maxPlayers: MAX_PLAYERS,
     minPlayers: MIN_PLAYERS,
     players: {},
@@ -104,7 +107,7 @@ function pointKey(point) {
 }
 
 function inBounds(point) {
-  return point.x >= 0 && point.y >= 0 && point.x < GRID && point.y < GRID;
+  return point.x >= 0 && point.y >= 0 && point.x < GRID_WIDTH && point.y < GRID_HEIGHT;
 }
 
 function opposite(a, b) {
@@ -300,7 +303,9 @@ export class SnakeRoom {
     return {
       roomCode: this.room.roomCode,
       phase: this.room.phase,
-      grid: this.room.grid,
+      grid: this.room.grid || GRID_HEIGHT,
+      gridWidth: this.room.gridWidth || GRID_WIDTH,
+      gridHeight: this.room.gridHeight || this.room.grid || GRID_HEIGHT,
       maxPlayers: this.room.maxPlayers,
       minPlayers: this.room.minPlayers,
       players: this.orderedPlayers().map((player) => ({
@@ -340,6 +345,9 @@ export class SnakeRoom {
     this.stopGameLoop();
     this.pendingDirections.clear();
     this.room.phase = "playing";
+    this.room.grid = GRID_HEIGHT;
+    this.room.gridWidth = GRID_WIDTH;
+    this.room.gridHeight = GRID_HEIGHT;
     this.room.winnerId = "";
     this.room.tick = 0;
     this.room.foods = [];
@@ -378,8 +386,8 @@ export class SnakeRoom {
     const occupied = this.occupiedPoints();
     for (let attempt = 0; attempt < 200; attempt += 1) {
       const food = {
-        x: Math.floor(Math.random() * GRID),
-        y: Math.floor(Math.random() * GRID),
+        x: Math.floor(Math.random() * GRID_WIDTH),
+        y: Math.floor(Math.random() * GRID_HEIGHT),
         value: Math.random() < 0.16 ? 30 : 10,
         assetId: FOOD_IDS[Math.floor(Math.random() * FOOD_IDS.length)],
       };
