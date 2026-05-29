@@ -1,9 +1,13 @@
-const GRID_WIDTH = 36;
-const GRID_HEIGHT = 24;
+const GRID_WIDTH = 36 * 10;
+const GRID_HEIGHT = 24 * 10;
 const MAX_PLAYERS = 6;
 const MIN_PLAYERS = 2;
 const TICK_MS = 115;
-const FOOD_TARGET = 16;
+const FOOD_TARGET = 72;
+const LOCAL_FOOD_RATIO = 0.62;
+const CONTESTED_FOOD_RATIO = 0.18;
+const FOOD_SPAWN_RADIUS = 22;
+const EXPLORE_FOOD_RADIUS = 72;
 const ROOM_CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 const VALID_DIRECTIONS = new Set(["up", "down", "left", "right"]);
 const SKIN_IDS = new Set(["cyber", "lava", "frost", "jungle", "royal", "candy", "galaxy", "jade", "tiger", "ghost"]);
@@ -38,12 +42,12 @@ const DIRS = {
 };
 
 const STARTS = [
-  { dir: "right", body: [{ x: 4, y: 5 }, { x: 3, y: 5 }, { x: 2, y: 5 }] },
-  { dir: "left", body: [{ x: 31, y: 18 }, { x: 32, y: 18 }, { x: 33, y: 18 }] },
-  { dir: "down", body: [{ x: 8, y: 18 }, { x: 8, y: 17 }, { x: 8, y: 16 }] },
-  { dir: "up", body: [{ x: 27, y: 6 }, { x: 27, y: 7 }, { x: 27, y: 8 }] },
-  { dir: "right", body: [{ x: 4, y: 12 }, { x: 3, y: 12 }, { x: 2, y: 12 }] },
-  { dir: "left", body: [{ x: 31, y: 11 }, { x: 32, y: 11 }, { x: 33, y: 11 }] },
+  { dir: "right", body: [{ x: 36, y: 48 }, { x: 35, y: 48 }, { x: 34, y: 48 }] },
+  { dir: "left", body: [{ x: 323, y: 192 }, { x: 324, y: 192 }, { x: 325, y: 192 }] },
+  { dir: "down", body: [{ x: 72, y: 192 }, { x: 72, y: 191 }, { x: 72, y: 190 }] },
+  { dir: "up", body: [{ x: 287, y: 48 }, { x: 287, y: 49 }, { x: 287, y: 50 }] },
+  { dir: "right", body: [{ x: 36, y: 120 }, { x: 35, y: 120 }, { x: 34, y: 120 }] },
+  { dir: "left", body: [{ x: 323, y: 120 }, { x: 324, y: 120 }, { x: 325, y: 120 }] },
 ];
 
 function json(data, init = {}) {
@@ -114,6 +118,10 @@ function opposite(a, b) {
   const first = DIRS[a];
   const second = DIRS[b];
   return first && second && first.x + second.x === 0 && first.y + second.y === 0;
+}
+
+function clamp(value, min, max) {
+  return Math.max(min, Math.min(max, value));
 }
 
 export class SnakeRoom {
@@ -384,11 +392,23 @@ export class SnakeRoom {
 
   spawnFood() {
     const occupied = this.occupiedPoints();
+    const anchors = Object.values(this.room.snakes)
+      .map((snake) => snake.body[0])
+      .filter(Boolean);
+    const modeRoll = Math.random();
+    const mode = modeRoll < LOCAL_FOOD_RATIO ? "local" : modeRoll < LOCAL_FOOD_RATIO + CONTESTED_FOOD_RATIO ? "contested" : "explore";
     for (let attempt = 0; attempt < 200; attempt += 1) {
+      const anchor = this.foodAnchor(anchors, mode);
+      const radius = mode === "explore" ? EXPLORE_FOOD_RADIUS : FOOD_SPAWN_RADIUS;
+      const isBonus = mode === "contested" || Math.random() < 0.16;
       const food = {
-        x: Math.floor(Math.random() * GRID_WIDTH),
-        y: Math.floor(Math.random() * GRID_HEIGHT),
-        value: Math.random() < 0.16 ? 30 : 10,
+        x: anchor
+          ? clamp(anchor.x + Math.floor(Math.random() * (radius * 2 + 1)) - radius, 0, GRID_WIDTH - 1)
+          : Math.floor(Math.random() * GRID_WIDTH),
+        y: anchor
+          ? clamp(anchor.y + Math.floor(Math.random() * (radius * 2 + 1)) - radius, 0, GRID_HEIGHT - 1)
+          : Math.floor(Math.random() * GRID_HEIGHT),
+        value: isBonus ? 30 : 10,
         assetId: FOOD_IDS[Math.floor(Math.random() * FOOD_IDS.length)],
       };
       if (occupied.has(pointKey(food))) continue;
@@ -396,6 +416,19 @@ export class SnakeRoom {
       this.room.foods.push(food);
       return;
     }
+  }
+
+  foodAnchor(anchors, mode) {
+    if (!anchors.length) return null;
+    if (mode === "contested" && anchors.length > 1) {
+      const first = anchors[Math.floor(Math.random() * anchors.length)];
+      const second = anchors[Math.floor(Math.random() * anchors.length)];
+      return {
+        x: Math.round((first.x + second.x) / 2),
+        y: Math.round((first.y + second.y) / 2),
+      };
+    }
+    return anchors[Math.floor(Math.random() * anchors.length)];
   }
 
   occupiedPoints(plans = null) {

@@ -43,6 +43,24 @@ const isFullscreen = ref(false);
 const CELL_SIZE = 35;
 const DEFAULT_GRID_WIDTH = 36;
 const DEFAULT_GRID_HEIGHT = 24;
+const DEFAULT_VIEWPORT_COLS = 36;
+const DEFAULT_VIEWPORT_ROWS = 24;
+const MIN_VIEWPORT_COLS = 22;
+const MIN_VIEWPORT_ROWS = 16;
+const CAMERA_SMOOTHING = 0.34;
+const MINIMAP_WIDTH = 154;
+const MINIMAP_HEIGHT = 104;
+const MINIMAP_PADDING = 12;
+const EDGE_HINT_PADDING = 34;
+const EDGE_HINT_DISTANCE = 34;
+const BOUNDARY_WARNING_CELLS = 7;
+const SPATIAL_BUCKET_SIZE = 12;
+const LONG_SNAKE_LENGTH = 720;
+const LONG_SNAKE_EXACT_SEGMENTS = 260;
+const LONG_SNAKE_TAIL_KEEP_SEGMENTS = 24;
+const LONG_SNAKE_VISIBLE_BUDGET = 560;
+const MINIMAP_DENSITY_CELL = 4;
+const MINIMAP_DENSITY_SAMPLE_TARGET = 1100;
 const dirs = {
   up: { x: 0, y: -1 },
   down: { x: 0, y: 1 },
@@ -56,6 +74,10 @@ let ctx;
 let socket;
 let resizeObserver;
 let lastDirection = "";
+let camera = { x: 0, y: 0 };
+let cameraReady = false;
+let animationFrameId = 0;
+let spatialCache = createSpatialCache();
 
 const safeRoomCode = computed(() => props.roomCode.trim().toUpperCase());
 const players = computed(() => room.value?.players || []);
@@ -111,9 +133,12 @@ function connect() {
     }
     if (message.type === "room") {
       serverError.value = "";
+      if (room.value?.phase !== message.state?.phase) cameraReady = false;
       room.value = message.state;
       nextTick(() => {
         resize();
+        if (message.state?.phase === "playing") startRenderLoop();
+        else stopRenderLoop();
         draw();
       });
     }
@@ -239,12 +264,16 @@ function resize() {
   const parent = target.parentElement;
   if (!parent) return;
 
-  const { width: boardWidth, height: boardHeight } = boardSize();
   const availableWidth = Math.max(260, parent.clientWidth - 12);
   const availableHeight = Math.max(220, parent.clientHeight - 12);
-  const scale = Math.min(availableWidth / boardWidth, availableHeight / boardHeight);
-  target.style.width = `${Math.floor(boardWidth * scale)}px`;
-  target.style.height = `${Math.floor(boardHeight * scale)}px`;
+  const boardRatio = availableWidth / availableHeight;
+  const width = Math.floor(availableWidth);
+  const height = Math.floor(availableWidth / boardRatio);
+
+  target.style.width = `${width}px`;
+  target.style.height = `${height}px`;
+  syncCanvasSize();
+  draw();
 }
 
 function gridSize() {
@@ -260,10 +289,22 @@ function gridSize() {
 }
 
 function boardSize() {
-  const grid = gridSize();
+  const target = canvas.value;
+  const parent = target?.parentElement;
+  if (parent) {
+    const availableWidth = Math.max(260, parent.clientWidth - 12);
+    const availableHeight = Math.max(220, parent.clientHeight - 12);
+    const viewportCols = Math.max(MIN_VIEWPORT_COLS, Math.round(availableWidth / CELL_SIZE));
+    const viewportRows = Math.max(MIN_VIEWPORT_ROWS, Math.round(availableHeight / CELL_SIZE));
+    return {
+      width: viewportCols * CELL_SIZE,
+      height: viewportRows * CELL_SIZE,
+    };
+  }
+
   return {
-    width: grid.width * CELL_SIZE,
-    height: grid.height * CELL_SIZE,
+    width: DEFAULT_VIEWPORT_COLS * CELL_SIZE,
+    height: DEFAULT_VIEWPORT_ROWS * CELL_SIZE,
   };
 }
 
@@ -274,6 +315,360 @@ function syncCanvasSize() {
     canvas.value.height = size.height;
   }
   return size;
+}
+
+function ownSnake() {
+  return room.value?.snakes?.[selfId.value] || null;
+}
+
+function targetCameraOffset(boardWidth, boardHeight, cell) {
+  const snake = ownSnake();
+  const grid = gridSize();
+  const worldWidth = grid.width * cell;
+  const worldHeight = grid.height * cell;
+  const fallback = {
+    x: Math.max(0, (worldWidth - boardWidth) / 2),
+    y: Math.max(0, (worldHeight - boardHeight) / 2),
+  };
+  const head = snake?.body?.[0];
+  const target = head
+    ? {
+        x: head.x * cell + cell / 2 - boardWidth / 2,
+        y: head.y * cell + cell / 2 - boardHeight / 2,
+      }
+    : fallback;
+
+  return {
+    x: clamp(target.x, 0, Math.max(0, worldWidth - boardWidth)),
+    y: clamp(target.y, 0, Math.max(0, worldHeight - boardHeight)),
+  };
+}
+
+function cameraOffset(boardWidth, boardHeight, cell) {
+  const target = targetCameraOffset(boardWidth, boardHeight, cell);
+  if (!cameraReady) {
+    camera = target;
+    cameraReady = true;
+    return camera;
+  }
+
+  camera = {
+    x: camera.x + (target.x - camera.x) * CAMERA_SMOOTHING,
+    y: camera.y + (target.y - camera.y) * CAMERA_SMOOTHING,
+  };
+  return camera;
+}
+
+function isPointVisible(point, camera, boardWidth, boardHeight, cell, padding = 2) {
+  const x = point.x * cell;
+  const y = point.y * cell;
+  return (
+    x >= camera.x - padding * cell &&
+    y >= camera.y - padding * cell &&
+    x <= camera.x + boardWidth + padding * cell &&
+    y <= camera.y + boardHeight + padding * cell
+  );
+}
+
+function visibleWorldBounds(camera, boardWidth, boardHeight, cell, padding = 2) {
+  return {
+    left: camera.x - padding * cell,
+    top: camera.y - padding * cell,
+    right: camera.x + boardWidth + padding * cell,
+    bottom: camera.y + boardHeight + padding * cell,
+  };
+}
+
+function bucketKey(x, y) {
+  return `${Math.floor(x / SPATIAL_BUCKET_SIZE)}:${Math.floor(y / SPATIAL_BUCKET_SIZE)}`;
+}
+
+function createSpatialCache(tick = null, roomRef = null) {
+  return {
+    tick,
+    roomRef,
+    foods: null,
+    snakes: new Map(),
+    minimapDensities: new Map(),
+  };
+}
+
+function ensureSpatialCache() {
+  const tick = room.value?.tick ?? -1;
+  if (spatialCache.tick !== tick || spatialCache.roomRef !== room.value) {
+    spatialCache = createSpatialCache(tick, room.value);
+  }
+}
+
+function buildPointBuckets(points) {
+  const buckets = new Map();
+  points.forEach((point) => {
+    const key = bucketKey(point.x, point.y);
+    if (!buckets.has(key)) buckets.set(key, []);
+    buckets.get(key).push(point);
+  });
+  return buckets;
+}
+
+function cachedFoodBuckets() {
+  ensureSpatialCache();
+  if (!spatialCache.foods) spatialCache.foods = buildPointBuckets(room.value?.foods || []);
+  return spatialCache.foods;
+}
+
+function snakeBodyLength(snake) {
+  return snake.bodyLength || snake.body?.length || 0;
+}
+
+function normalizePublicBodyPart(part, fallbackIndex, sampled = false) {
+  return {
+    ...part,
+    index: Number.isFinite(part.index) ? part.index : fallbackIndex,
+    tailSampled: sampled || Boolean(part.tailSampled),
+    sampleWeight: part.sampleWeight || 1,
+  };
+}
+
+function snakeRenderParts(snake) {
+  const body = snake.body || [];
+  const bodyLength = snakeBodyLength(snake);
+  if (bodyLength > body.length) {
+    return body.map((part, index) => normalizePublicBodyPart(part, index, Boolean(part.tailSampled)));
+  }
+
+  return body.map((part, index) => normalizePublicBodyPart(part, index, false));
+}
+
+function cachedSnakeBuckets(snake) {
+  ensureSpatialCache();
+  const cacheKey = snake.playerId;
+  if (!spatialCache.snakes.has(cacheKey)) {
+    spatialCache.snakes.set(cacheKey, buildPointBuckets(snakeRenderParts(snake)));
+  }
+  return spatialCache.snakes.get(cacheKey);
+}
+
+function queryBuckets(buckets, camera, boardWidth, boardHeight, cell, padding = 2) {
+  const left = Math.floor((camera.x / cell - padding) / SPATIAL_BUCKET_SIZE);
+  const right = Math.floor(((camera.x + boardWidth) / cell + padding) / SPATIAL_BUCKET_SIZE);
+  const top = Math.floor((camera.y / cell - padding) / SPATIAL_BUCKET_SIZE);
+  const bottom = Math.floor(((camera.y + boardHeight) / cell + padding) / SPATIAL_BUCKET_SIZE);
+  const items = [];
+  for (let y = top; y <= bottom; y += 1) {
+    for (let x = left; x <= right; x += 1) {
+      const bucket = buckets.get(`${x}:${y}`);
+      if (bucket) items.push(...bucket);
+    }
+  }
+  return items;
+}
+
+function worldToScreen(point, camera, cell) {
+  return {
+    x: point.x * cell + cell / 2 - camera.x,
+    y: point.y * cell + cell / 2 - camera.y,
+  };
+}
+
+function clamp(value, min, max) {
+  return Math.max(min, Math.min(max, value));
+}
+
+function hexToRgb(hex) {
+  const normalized = String(hex || "").replace("#", "");
+  if (!/^[\da-f]{6}$/i.test(normalized)) return { r: 83, g: 243, b: 255 };
+  const value = Number.parseInt(normalized, 16);
+  return {
+    r: (value >> 16) & 255,
+    g: (value >> 8) & 255,
+    b: value & 255,
+  };
+}
+
+function colorWithAlpha(hex, alpha) {
+  const { r, g, b } = hexToRgb(hex);
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+}
+
+function cachedMinimapDensity(snake, grid, width, height) {
+  ensureSpatialCache();
+  const cacheKey = `${snake.playerId}:${Math.round(width)}:${Math.round(height)}`;
+  if (spatialCache.minimapDensities.has(cacheKey)) return spatialCache.minimapDensities.get(cacheKey);
+
+  const body = snake.body || [];
+  const bodyLength = snakeBodyLength(snake);
+  const cols = Math.max(1, Math.ceil(width / MINIMAP_DENSITY_CELL));
+  const rows = Math.max(1, Math.ceil(height / MINIMAP_DENSITY_CELL));
+  const cellWidth = width / cols;
+  const cellHeight = height / rows;
+  const bins = new Map();
+  const addPart = (part, weight = 1) => {
+    const binX = clamp(Math.floor((part.x / grid.width) * cols), 0, cols - 1);
+    const binY = clamp(Math.floor((part.y / grid.height) * rows), 0, rows - 1);
+    const key = `${binX}:${binY}`;
+    bins.set(key, (bins.get(key) || 0) + weight);
+  };
+
+  if (bodyLength > body.length || body.some((part) => part.sampleWeight > 1)) {
+    body.forEach((part) => addPart(part, part.sampleWeight || 1));
+  } else {
+    const stride = Math.max(1, Math.ceil(body.length / MINIMAP_DENSITY_SAMPLE_TARGET));
+    for (let index = 0; index < body.length; index += stride) {
+      addPart(body[index], Math.min(stride, body.length - index));
+    }
+  }
+
+  let maxCount = 1;
+  const cells = [...bins.entries()].map(([key, count]) => {
+    const [binX, binY] = key.split(":").map(Number);
+    maxCount = Math.max(maxCount, count);
+    return { binX, binY, count };
+  });
+  const density = { cells, maxCount, cellWidth, cellHeight };
+  spatialCache.minimapDensities.set(cacheKey, density);
+  return density;
+}
+
+function drawMinimapSnakeDensity(snake, skin, grid, x, y, width, height) {
+  if (snake.playerId === selfId.value) return;
+  const density = cachedMinimapDensity(snake, grid, width, height);
+  if (!density.cells.length) return;
+
+  ctx.save();
+  density.cells.forEach((cell) => {
+    const strength = Math.min(1, cell.count / density.maxCount);
+    ctx.fillStyle = colorWithAlpha(skin.body, 0.12 + strength * 0.34);
+    ctx.fillRect(
+      x + cell.binX * density.cellWidth,
+      y + cell.binY * density.cellHeight,
+      Math.max(1.4, density.cellWidth + 0.5),
+      Math.max(1.4, density.cellHeight + 0.5),
+    );
+  });
+  ctx.restore();
+}
+
+function drawMinimap(grid, camera, boardWidth, boardHeight) {
+  const width = Math.min(MINIMAP_WIDTH, boardWidth * 0.32);
+  const height = Math.min(MINIMAP_HEIGHT, boardHeight * 0.28);
+  const x = boardWidth - width - MINIMAP_PADDING;
+  const y = MINIMAP_PADDING;
+  const scaleX = width / grid.width;
+  const scaleY = height / grid.height;
+  const viewLeft = clamp(camera.x / CELL_SIZE, 0, grid.width);
+  const viewTop = clamp(camera.y / CELL_SIZE, 0, grid.height);
+  const viewRight = clamp((camera.x + boardWidth) / CELL_SIZE, viewLeft, grid.width);
+  const viewBottom = clamp((camera.y + boardHeight) / CELL_SIZE, viewTop, grid.height);
+  const viewX = x + viewLeft * scaleX;
+  const viewY = y + viewTop * scaleY;
+  const viewWidth = (viewRight - viewLeft) * scaleX;
+  const viewHeight = (viewBottom - viewTop) * scaleY;
+
+  ctx.save();
+  ctx.shadowBlur = 12;
+  ctx.shadowColor = "rgba(83, 243, 255, 0.22)";
+  ctx.fillStyle = "rgba(3, 8, 18, 0.76)";
+  roundedRect(x, y, width, height, 8);
+  ctx.fill();
+  ctx.shadowBlur = 0;
+  ctx.strokeStyle = "rgba(145, 235, 255, 0.3)";
+  ctx.stroke();
+
+  ctx.save();
+  roundedRect(x, y, width, height, 8);
+  ctx.clip();
+
+  Object.values(room.value?.snakes || {}).forEach((snake) => {
+    const player = players.value.find((item) => item.id === snake.playerId);
+    const skin = getSnakeSkinById(player?.skinId || "cyber");
+    drawMinimapSnakeDensity(snake, skin, grid, x, y, width, height);
+  });
+
+  (room.value?.foods || []).forEach((food) => {
+    ctx.fillStyle = food.value > 10 ? "#facc15" : "#ffd166";
+    ctx.fillRect(x + food.x * scaleX - 1, y + food.y * scaleY - 1, 2, 2);
+  });
+
+  Object.values(room.value?.snakes || {}).forEach((snake) => {
+    const head = snake.body?.[0];
+    if (!head) return;
+    const player = players.value.find((item) => item.id === snake.playerId);
+    const skin = getSnakeSkinById(player?.skinId || "cyber");
+    ctx.fillStyle = snake.playerId === selfId.value ? "#ffffff" : skin.head;
+    ctx.beginPath();
+    ctx.arc(x + head.x * scaleX, y + head.y * scaleY, snake.playerId === selfId.value ? 3 : 2.2, 0, Math.PI * 2);
+    ctx.fill();
+  });
+
+  ctx.restore();
+
+  ctx.strokeStyle = "rgba(83, 243, 255, 0.56)";
+  ctx.lineWidth = 1;
+  ctx.strokeRect(viewX, viewY, viewWidth, viewHeight);
+
+  ctx.restore();
+}
+
+function drawEdgeHint(point, camera, boardWidth, boardHeight, cell, color, radius = 7) {
+  const screen = worldToScreen(point, camera, cell);
+  if (
+    screen.x >= EDGE_HINT_PADDING &&
+    screen.y >= EDGE_HINT_PADDING &&
+    screen.x <= boardWidth - EDGE_HINT_PADDING &&
+    screen.y <= boardHeight - EDGE_HINT_PADDING
+  ) {
+    return;
+  }
+
+  const center = { x: boardWidth / 2, y: boardHeight / 2 };
+  const angle = Math.atan2(screen.y - center.y, screen.x - center.x);
+  const x = clamp(center.x + Math.cos(angle) * (boardWidth / 2 - EDGE_HINT_DISTANCE), EDGE_HINT_PADDING, boardWidth - EDGE_HINT_PADDING);
+  const y = clamp(center.y + Math.sin(angle) * (boardHeight / 2 - EDGE_HINT_DISTANCE), EDGE_HINT_PADDING, boardHeight - EDGE_HINT_PADDING);
+
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.rotate(angle);
+  ctx.fillStyle = color;
+  ctx.shadowBlur = 12;
+  ctx.shadowColor = color;
+  ctx.beginPath();
+  ctx.moveTo(radius + 6, 0);
+  ctx.lineTo(-radius, -radius);
+  ctx.lineTo(-radius, radius);
+  ctx.closePath();
+  ctx.fill();
+  ctx.restore();
+}
+
+function drawEdgeHints(camera, boardWidth, boardHeight, cell) {
+  const foods = [...(room.value?.foods || [])]
+    .sort((a, b) => b.value - a.value)
+    .slice(0, 8);
+  foods.forEach((food) => drawEdgeHint(food, camera, boardWidth, boardHeight, cell, food.value > 10 ? "#facc15" : "#ffd166", 5));
+
+  Object.values(room.value?.snakes || {}).forEach((snake) => {
+    if (snake.playerId === selfId.value) return;
+    const head = snake.body?.[0];
+    if (!head) return;
+    const player = players.value.find((item) => item.id === snake.playerId);
+    const skin = getSnakeSkinById(player?.skinId || "cyber");
+    drawEdgeHint(head, camera, boardWidth, boardHeight, cell, skin.head, 7);
+  });
+}
+
+function drawBoundaryWarning(grid, camera, boardWidth, boardHeight, cell) {
+  const head = ownSnake()?.body?.[0];
+  if (!head) return;
+  const distance = Math.min(head.x, head.y, grid.width - 1 - head.x, grid.height - 1 - head.y);
+  if (distance > BOUNDARY_WARNING_CELLS) return;
+  const alpha = 1 - distance / BOUNDARY_WARNING_CELLS;
+
+  ctx.save();
+  ctx.globalAlpha = 0.18 + alpha * 0.34;
+  ctx.strokeStyle = "#facc15";
+  ctx.lineWidth = 8;
+  ctx.strokeRect(4, 4, boardWidth - 8, boardHeight - 8);
+  ctx.restore();
 }
 
 function roundedRect(x, y, width, height, radius) {
@@ -319,23 +714,25 @@ function drawFood(food, cell) {
   ctx.restore();
 }
 
-function drawSnakePart(part, index, cell, skin, dir, faded) {
+function drawSnakePart(part, index, cell, skin, dir, faded, sampled = false) {
   const gap = Math.max(0.5, cell * 0.025);
-  const x = part.x * cell + gap;
-  const y = part.y * cell + gap;
-  const partSize = cell - gap * 2;
   const isHead = index === 0;
+  const isTailSample = sampled && !isHead;
+  const sampleInset = isTailSample ? cell * 0.18 : 0;
+  const x = part.x * cell + gap + sampleInset;
+  const y = part.y * cell + gap + sampleInset;
+  const partSize = cell - gap * 2 - sampleInset * 2;
   const center = { x: x + partSize / 2, y: y + partSize / 2 };
 
   ctx.save();
-  ctx.globalAlpha = faded ? 0.42 : 1;
-  ctx.shadowBlur = isHead ? 18 : 10;
+  ctx.globalAlpha = faded ? (isTailSample ? 0.28 : 0.42) : isTailSample ? 0.62 : 1;
+  ctx.shadowBlur = isHead ? 18 : isTailSample ? 5 : 10;
   ctx.shadowColor = isHead ? skin.head : skin.glow;
   const fill = ctx.createLinearGradient(x, y, x + partSize, y + partSize);
   fill.addColorStop(0, isHead ? skin.head : skin.body);
   fill.addColorStop(1, skin.bodyAlt);
   ctx.fillStyle = fill;
-  roundedRect(x, y, partSize, partSize, isHead ? partSize * 0.42 : partSize * 0.32);
+  roundedRect(x, y, partSize, partSize, isHead ? partSize * 0.42 : isTailSample ? partSize * 0.5 : partSize * 0.32);
   ctx.fill();
 
   if (isHead) {
@@ -362,13 +759,50 @@ function drawSnakePart(part, index, cell, skin, dir, faded) {
   ctx.restore();
 }
 
-function drawSnake(snake) {
+function clipVisibleSnakeParts(parts, bodyLength) {
+  if (!parts.some((part) => part.tailSampled) || bodyLength <= LONG_SNAKE_LENGTH || parts.length <= LONG_SNAKE_VISIBLE_BUDGET) return parts;
+
+  const tailKeepStart = Math.max(LONG_SNAKE_EXACT_SEGMENTS, bodyLength - LONG_SNAKE_TAIL_KEEP_SEGMENTS);
+  const exact = [];
+  const tail = [];
+  const middle = [];
+  parts.forEach((part) => {
+    if (part.index < LONG_SNAKE_EXACT_SEGMENTS) exact.push(part);
+    else if (part.index >= tailKeepStart) tail.push(part);
+    else middle.push(part);
+  });
+
+  const middleBudget = Math.max(0, LONG_SNAKE_VISIBLE_BUDGET - exact.length - tail.length);
+  if (middle.length <= middleBudget) return parts;
+
+  const stride = Math.max(1, Math.ceil(middle.length / Math.max(1, middleBudget)));
+  return [...exact, ...middle.filter((_, index) => index % stride === 0), ...tail].sort((a, b) => b.index - a.index);
+}
+
+function drawSnake(snake, camera, boardWidth, boardHeight) {
   const player = players.value.find((item) => item.id === snake.playerId);
   const skin = getSnakeSkinById(player?.skinId || "cyber");
   const cell = CELL_SIZE;
   const dir = dirs[snake.dir] || dirs.right;
-  [...snake.body].reverse().forEach((part, reversedIndex) => {
-    drawSnakePart(part, snake.body.length - 1 - reversedIndex, cell, skin, dir, !player?.connected);
+  const buckets = cachedSnakeBuckets(snake);
+  const parts = queryBuckets(buckets, camera, boardWidth, boardHeight, cell)
+    .filter((part) => isPointVisible(part, camera, boardWidth, boardHeight, cell))
+    .sort((a, b) => b.index - a.index);
+  clipVisibleSnakeParts(parts, snakeBodyLength(snake)).forEach((part) => {
+    drawSnakePart(part, part.index, cell, skin, dir, !player?.connected, part.tailSampled);
+  });
+}
+
+function visibleFoods(camera, boardWidth, boardHeight, cell) {
+  const buckets = cachedFoodBuckets();
+  return queryBuckets(buckets, camera, boardWidth, boardHeight, cell).filter((food) =>
+    isPointVisible(food, camera, boardWidth, boardHeight, cell),
+  );
+}
+
+function drawVisibleSnakes(camera, boardWidth, boardHeight) {
+  Object.values(room.value?.snakes || {}).forEach((snake) => {
+    drawSnake(snake, camera, boardWidth, boardHeight);
   });
 }
 
@@ -377,28 +811,69 @@ function draw() {
   const grid = gridSize();
   const { width: boardWidth, height: boardHeight } = syncCanvasSize();
   const cell = CELL_SIZE;
+  const camera = cameraOffset(boardWidth, boardHeight, cell);
   ctx.clearRect(0, 0, boardWidth, boardHeight);
   ctx.fillStyle = "#020611";
   ctx.fillRect(0, 0, boardWidth, boardHeight);
+
+  ctx.save();
+  ctx.translate(-camera.x, -camera.y);
+
+  const worldWidth = grid.width * cell;
+  const worldHeight = grid.height * cell;
+  const visibleBounds = visibleWorldBounds(camera, boardWidth, boardHeight, cell);
   ctx.strokeStyle = "rgba(83, 243, 255, 0.06)";
-  for (let i = 0; i <= grid.width; i += 1) {
+  ctx.lineWidth = 1;
+  const startCol = Math.max(0, Math.floor(camera.x / cell) - 1);
+  const endCol = Math.min(grid.width, Math.ceil((camera.x + boardWidth) / cell) + 1);
+  const startRow = Math.max(0, Math.floor(camera.y / cell) - 1);
+  const endRow = Math.min(grid.height, Math.ceil((camera.y + boardHeight) / cell) + 1);
+  for (let i = startCol; i <= endCol; i += 1) {
     const x = i * cell;
     ctx.beginPath();
-    ctx.moveTo(x, 0);
-    ctx.lineTo(x, boardHeight);
+    ctx.moveTo(x, Math.max(0, visibleBounds.top));
+    ctx.lineTo(x, Math.min(worldHeight, visibleBounds.bottom));
     ctx.stroke();
   }
-  for (let i = 0; i <= grid.height; i += 1) {
+  for (let i = startRow; i <= endRow; i += 1) {
     const y = i * cell;
     ctx.beginPath();
-    ctx.moveTo(0, y);
-    ctx.lineTo(boardWidth, y);
+    ctx.moveTo(Math.max(0, visibleBounds.left), y);
+    ctx.lineTo(Math.min(worldWidth, visibleBounds.right), y);
     ctx.stroke();
   }
 
-  (room.value?.foods || []).forEach((food) => drawFood(food, cell));
-  Object.values(room.value?.snakes || {}).forEach(drawSnake);
+  ctx.strokeStyle = "rgba(255, 209, 102, 0.28)";
+  ctx.lineWidth = 4;
+  ctx.strokeRect(0, 0, worldWidth, worldHeight);
+
+  visibleFoods(camera, boardWidth, boardHeight, cell).forEach((food) => drawFood(food, cell));
+  drawVisibleSnakes(camera, boardWidth, boardHeight);
+  ctx.restore();
+  drawBoundaryWarning(grid, camera, boardWidth, boardHeight, cell);
+  drawEdgeHints(camera, boardWidth, boardHeight, cell);
+  drawMinimap(grid, camera, boardWidth, boardHeight);
   ctx.shadowBlur = 0;
+}
+
+function renderLoop() {
+  draw();
+  if (room.value?.phase === "playing") {
+    animationFrameId = window.requestAnimationFrame(renderLoop);
+  } else {
+    animationFrameId = 0;
+  }
+}
+
+function startRenderLoop() {
+  if (animationFrameId) return;
+  animationFrameId = window.requestAnimationFrame(renderLoop);
+}
+
+function stopRenderLoop() {
+  if (!animationFrameId) return;
+  window.cancelAnimationFrame(animationFrameId);
+  animationFrameId = 0;
 }
 
 const swipe = createSwipeHandlers(setDirection);
@@ -426,6 +901,7 @@ onUnmounted(() => {
   document.removeEventListener("webkitfullscreenchange", onFullscreenChange);
   document.removeEventListener("mozfullscreenchange", onFullscreenChange);
   document.removeEventListener("msfullscreenchange", onFullscreenChange);
+  stopRenderLoop();
 });
 
 watch(room, () => draw(), { deep: true });
