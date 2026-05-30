@@ -1207,11 +1207,14 @@ function drawFood(food, cell) {
   ctx.restore();
 }
 
+// 平滑插值：让每段从"上一帧自身所在格"滑向"当前所在格"，整条蛇连续爬行，
+// 而非只有蛇头移动、蛇身每个 tick 瞬间跳一格（那会造成肉眼可见的一闪一闪）。
+// 必须用相同的 index：移动后 body[i] 等于旧 body[i-1]，而旧 body[i] 正是它的前一格，
+// 因此 previousBody[i] → body[i] 恰好是该段向前滑动一格。
 function interpolatedPart(snake, part) {
   if (renderAlpha >= 0.99) return part;
-  const previous = snake.previousBody;
-  const from = previous?.[Math.max(0, part.index - 1)];
-  if (!from) return part;
+  const from = snake.previousBody?.[part.index];
+  if (!from) return part; // 吃食物时新长出的尾段没有对应历史位置，直接停在原地
   return {
     ...part,
     x: from.x + (part.x - from.x) * renderAlpha,

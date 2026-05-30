@@ -60,6 +60,12 @@ const MINIMAP_DENSITY_CELL = 4;
 const MINIMAP_DENSITY_SAMPLE_TARGET = 1100;
 const TOUCH_DIRECTION_DEADZONE = 14;
 const INPUT_SEND_INTERVAL = 50;
+// 客户端插值参数：联机版蛇位置只在收到服务器 tick 时更新，
+// 在两个 tick 之间按 renderAlpha 插值，让蛇连续爬行而非每个 tick 瞬间跳一格。
+const SERVER_TICK_MS = 115; // 对齐 worker 的 TICK_MS，作为 tickDuration 初值与基准
+const TICK_DURATION_MIN = 80; // tickDuration 估算下界
+const TICK_DURATION_MAX = 260; // tickDuration 估算上界
+const TICK_DURATION_EMA = 0.2; // EMA 平滑系数（新样本权重），偏小更稳
 const dirs = {
   up: { x: 0, y: -1 },
   down: { x: 0, y: 1 },
@@ -86,6 +92,12 @@ let lastDirection = null;
 let lastInputAt = 0;
 let camera = { x: 0, y: 0 };
 let cameraReady = false;
+// 插值状态：上一服务器 tick 各蛇身体的深拷贝（插值起点），及 tick 计时
+let previousBodies = new Map(); // playerId -> [{x,y}]，上一 tick 的身体快照
+let lastSnapshotTick = null; // 已快照的服务器 tick 值，用于去重
+let lastTickAt = 0; // 最近一次 tick 到达时间（performance.now()）
+let tickDuration = SERVER_TICK_MS; // EMA 估算的 tick 周期（ms）
+let renderAlpha = 1; // 当前帧插值系数 [0,1]，1=完全到达目标格（初值不插值）
 let animationFrameId = 0;
 let spatialCache = createSpatialCache();
 let canvasSize = { width: DEFAULT_VIEWPORT_COLS * CELL_SIZE, height: DEFAULT_VIEWPORT_ROWS * CELL_SIZE };
@@ -124,6 +136,12 @@ function makeWsUrl() {
 }
 
 function connect() {
+  // 初连/重连：清空插值状态，避免沿用上一连接的陈旧快照
+  previousBodies = new Map();
+  lastSnapshotTick = null;
+  lastTickAt = 0;
+  tickDuration = SERVER_TICK_MS;
+  renderAlpha = 1;
   connection.value = "connecting";
   serverError.value = "";
   socket?.close();
@@ -144,14 +162,65 @@ function connect() {
     }
     if (message.type === "room") {
       serverError.value = "";
-      if (room.value?.phase !== message.state?.phase) {
+      const nextState = message.state;
+      const phaseChanged = room.value?.phase !== nextState?.phase;
+      if (phaseChanged) {
         cameraReady = false;
         lastDirection = null;
       }
-      room.value = message.state;
+
+      // 插值快照与 tick 计时：仅在对局中、且服务器 tick 真正前进时进行
+      const nextTickValue = nextState?.tick ?? null;
+      const tickAdvanced =
+        nextState?.phase === "playing" &&
+        room.value?.phase === "playing" && // 旧态也是 playing，才有合法的"上一帧"
+        !phaseChanged &&
+        nextTickValue != null &&
+        nextTickValue !== lastSnapshotTick;
+
+      if (tickAdvanced) {
+        // 覆盖前，把旧的各蛇身体深拷贝为下一段插值的起点（整表替换，消失的蛇不残留）
+        const snapshot = new Map();
+        const oldSnakes = room.value?.snakes || {};
+        for (const id of Object.keys(oldSnakes)) {
+          const body = oldSnakes[id]?.body;
+          if (Array.isArray(body)) snapshot.set(id, body.map((p) => ({ x: p.x, y: p.y })));
+        }
+        previousBodies = snapshot;
+
+        const now = performance.now();
+        if (lastTickAt) {
+          const observed = now - lastTickAt;
+          // 过滤切后台/卡顿等异常样本，再以 EMA 平滑估算 tick 周期
+          if (observed >= TICK_DURATION_MIN && observed <= TICK_DURATION_MAX * 1.5) {
+            tickDuration = clamp(
+              tickDuration + (observed - tickDuration) * TICK_DURATION_EMA,
+              TICK_DURATION_MIN,
+              TICK_DURATION_MAX,
+            );
+          }
+        }
+        lastTickAt = now;
+        lastSnapshotTick = nextTickValue;
+        renderAlpha = 0; // 新 tick 刚到，从起点开始插值
+      } else if (nextState?.phase !== "playing") {
+        // 非对局阶段：禁用插值
+        previousBodies = new Map();
+        lastSnapshotTick = nextTickValue;
+        lastTickAt = 0;
+        renderAlpha = 1;
+      } else if (phaseChanged) {
+        // 刚进入 playing 首帧：建立计时基线，但本帧无上一帧、不插值
+        previousBodies = new Map();
+        lastSnapshotTick = nextTickValue;
+        lastTickAt = performance.now();
+        renderAlpha = 1;
+      }
+
+      room.value = nextState;
       nextTick(() => {
         resize();
-        if (message.state?.phase === "playing") startRenderLoop();
+        if (nextState?.phase === "playing") startRenderLoop();
         else stopRenderLoop();
         draw();
       });
@@ -371,8 +440,21 @@ function ownSnake() {
   return room.value?.snakes?.[selfId.value] || null;
 }
 
+// 自己蛇头插值后的世界格坐标，供相机平滑跟随；
+// 缺起点/已到位返回目标头，无蛇（观战/死亡）返回 null 让相机回退到世界居中。
+function ownHeadInterpolated() {
+  const head = ownSnake()?.body?.[0];
+  if (!head) return null;
+  if (renderAlpha >= 0.99) return head;
+  const from = previousBodies.get(selfId.value)?.[0];
+  if (!from) return head;
+  return {
+    x: from.x + (head.x - from.x) * renderAlpha,
+    y: from.y + (head.y - from.y) * renderAlpha,
+  };
+}
+
 function targetCameraOffset(boardWidth, boardHeight, cell) {
-  const snake = ownSnake();
   const grid = gridSize();
   const worldWidth = grid.width * cell;
   const worldHeight = grid.height * cell;
@@ -380,7 +462,7 @@ function targetCameraOffset(boardWidth, boardHeight, cell) {
     x: Math.max(0, (worldWidth - boardWidth) / 2),
     y: Math.max(0, (worldHeight - boardHeight) / 2),
   };
-  const head = snake?.body?.[0];
+  const head = ownHeadInterpolated();
   const target = head
     ? {
         x: head.x * cell + cell / 2 - boardWidth / 2,
@@ -840,6 +922,20 @@ function clipVisibleSnakeParts(parts, bodyLength) {
   return [...exact, ...middle.filter((_, index) => index % stride === 0), ...tail].sort((a, b) => b.index - a.index);
 }
 
+// 让每段从"上一服务器 tick 自身所在格"滑向"当前格"，整条蛇连续爬行。
+// 数学同单机：移动后 body[i] === 旧 body[i-1]，故 previousBodies[id][i] → body[i] 即该段前滑一格。
+// 仅作用于最终绘制坐标：分桶/裁剪/缓存仍用目标整数格坐标，避免污染空间索引。
+function interpolateSnakePart(playerId, part) {
+  if (renderAlpha >= 0.99) return part;
+  const from = previousBodies.get(playerId)?.[part.index];
+  if (!from) return part; // 缺起点（新蛇/吃食物新尾段/刚切阶段/刚重生）：停在当前格
+  return {
+    ...part,
+    x: from.x + (part.x - from.x) * renderAlpha,
+    y: from.y + (part.y - from.y) * renderAlpha,
+  };
+}
+
 function drawSnake(snake, camera, boardWidth, boardHeight) {
   const player = players.value.find((item) => item.id === snake.playerId);
   const skin = getSnakeSkinById(player?.skinId || "cyber");
@@ -848,7 +944,8 @@ function drawSnake(snake, camera, boardWidth, boardHeight) {
   const buckets = cachedSnakeBuckets(snake);
   const parts = queryBuckets(buckets, camera, boardWidth, boardHeight, cell)
     .filter((part) => isPointVisible(part, camera, boardWidth, boardHeight, cell))
-    .sort((a, b) => b.index - a.index);
+    .sort((a, b) => b.index - a.index)
+    .map((part) => interpolateSnakePart(snake.playerId, part)); // 绘制前插值，平滑爬行
   clipVisibleSnakeParts(parts, snakeBodyLength(snake)).forEach((part) => {
     drawSnakePart(part, part.index, cell, skin, dir, !player?.connected, part.tailSampled);
   });
@@ -918,6 +1015,12 @@ function draw() {
 }
 
 function renderLoop() {
+  // 仅 renderLoop 推进插值系数：距上次 tick 越久越接近目标格
+  if (room.value?.phase === "playing" && lastTickAt) {
+    renderAlpha = clamp((performance.now() - lastTickAt) / tickDuration, 0, 1);
+  } else {
+    renderAlpha = 1; // 非对局或尚无计时基线：不插值
+  }
   draw();
   if (room.value?.phase === "playing") {
     animationFrameId = window.requestAnimationFrame(renderLoop);
