@@ -1,6 +1,5 @@
 <script setup>
 import { computed, onMounted, onUnmounted, ref } from "vue";
-import { useRoute, useRouter } from "vue-router";
 import { ChevronDown, Settings, Maximize, Minimize } from "lucide-vue-next";
 import GameLayout from "../components/GameLayout.vue";
 import { SNAKE_FOODS } from "../data/snakeFoods";
@@ -16,17 +15,13 @@ const paused = ref(false);
 const selectedSkinId = ref(getSavedValue("snake:skin", "cyber"));
 const selectedSkin = computed(() => getSnakeSkinById(selectedSkinId.value));
 const isFullscreen = ref(false);
-const gameEnded = ref(false);
-const route = useRoute();
-const router = useRouter();
-const homeTabIds = new Set(["featured", "all", "action", "puzzle", "strategy", "progress"]);
 
 const size = 840;
 const VIEWPORT_GRID = 24;
 const WORLD_SCALE = 10;
 const grid = VIEWPORT_GRID * WORLD_SCALE;
 const CELL_SIZE = 30;
-const CAMERA_SMOOTHING = 1;
+const CAMERA_SMOOTHING = 0.26;
 const FOOD_TARGET = 72;
 const LOCAL_FOOD_RATIO = 0.62;
 const CONTESTED_FOOD_RATIO = 0.18;
@@ -46,7 +41,13 @@ const LONG_SNAKE_TAIL_KEEP_SEGMENTS = 24;
 const LONG_SNAKE_VISIBLE_BUDGET = 560;
 const HIT_RADIUS = 0.72;
 const FOOD_PICKUP_RADIUS = 0.86;
-const TOUCH_DIRECTION_DEADZONE = 14;
+const TOUCH_DIRECTION_DEADZONE = 8;
+const TOUCH_DIRECTION_SMOOTHING = 0.42;
+const MAX_TURN_DEGREES = 150; // 单次转向最大角度，避免移动端瞬间 180° 反向
+const MAX_TURN_RADIANS = (MAX_TURN_DEGREES * Math.PI) / 180;
+const RESPAWN_DELAY = 3000; // 玩家死亡后随机复活的延迟（毫秒）
+const FOOD_CHAIN_STRIDE = 3; // 食物链采样间隔：身体每隔几段掉落一个食物
+const FOOD_CHAIN_MAX = 60; // 单次死亡掉落食物数量上限，避免食物无限堆积
 const HIT_RADIUS_SQUARED = HIT_RADIUS * HIT_RADIUS;
 const FOOD_PICKUP_RADIUS_SQUARED = FOOD_PICKUP_RADIUS * FOOD_PICKUP_RADIUS;
 const dirs = {
@@ -56,6 +57,7 @@ const dirs = {
   right: { x: 1, y: 0 },
 };
 const DIR_ENTRIES = Object.entries(dirs);
+const DIR_NAMES = Object.keys(dirs);
 const KEY_ACTIONS = {
   ArrowUp: "up",
   ArrowDown: "down",
@@ -76,7 +78,7 @@ let direction;
 let nextDirection;
 let loopId = 0;
 let lastTick = 0;
-let gameOver = false;
+let renderAlpha = 1;
 let camera = { x: 0, y: 0 };
 let cameraReady = false;
 let stateTick = 0;
@@ -86,6 +88,11 @@ let canvasSize = { width: size, height: size };
 const foodImages = new Map();
 let foodBag = [];
 let lastFoodId = "";
+let activePointerId = null;
+let smoothedTouchDirection = null;
+let touchAnchor = null; // 当前触摸的起始屏幕坐标（相对画布），用于判定滑动方向
+let lastPlayerHead = null; // 玩家最近一次的头部世界坐标，死亡期间供相机定位
+let frameNow = 0; // 最近一帧的时间戳（来自 requestAnimationFrame），用于复活计时
 
 function selectSkin(id) {
   selectedSkinId.value = id;
@@ -129,6 +136,19 @@ function normalizeDirection(dir) {
     x: dir.x / length,
     y: dir.y / length,
   };
+}
+
+// 将目标方向相对当前方向的转角限制在 ±MAX_TURN_DEGREES 内，
+// 这样单次转向最多 150°，无法一步反向（防止瞬间 180° 调头）。
+function limitTurn(target, current) {
+  const currentAngle = Math.atan2(current.y, current.x);
+  const targetAngle = Math.atan2(target.y, target.x);
+  let delta = targetAngle - currentAngle;
+  while (delta > Math.PI) delta -= Math.PI * 2;
+  while (delta < -Math.PI) delta += Math.PI * 2;
+  const clamped = clamp(delta, -MAX_TURN_RADIANS, MAX_TURN_RADIANS);
+  const angle = currentAngle + clamped;
+  return { x: Math.cos(angle), y: Math.sin(angle) };
 }
 
 function clamp(value, min, max) {
@@ -245,39 +265,64 @@ function onFullscreenChange() {
   setTimeout(() => resize(), 100);
 }
 
-function makeStartBody(x, y, dirName, length) {
+function makeBodyAt(headX, headY, dirName, length) {
   const dir = dirs[dirName];
-  const head = { x: x * WORLD_SCALE, y: y * WORLD_SCALE };
   return Array.from({ length }, (_, index) => ({
-    x: head.x - dir.x * index,
-    y: head.y - dir.y * index,
+    x: headX - dir.x * index,
+    y: headY - dir.y * index,
   }));
 }
 
+function makeStartBody(x, y, dirName, length) {
+  return makeBodyAt(x * WORLD_SCALE, y * WORLD_SCALE, dirName, length);
+}
+
+function cloneBody(body = []) {
+  return body.map((part) => ({ x: part.x, y: part.y }));
+}
+
+function snapshotSnake(snake) {
+  if (!snake) return;
+  snake.previousBody = cloneBody(snake.body);
+}
+
 function restart() {
+  const playerBody = makeStartBody(12, 16, "right", 4);
+  const aiStartBodies = [
+    makeStartBody(5, 5, "right", 3),
+    makeStartBody(19, 7, "left", 3),
+    makeStartBody(8, 20, "up", 3),
+  ];
   player = {
-    body: makeStartBody(12, 16, "right", 4),
+    body: playerBody,
+    previousBody: cloneBody(playerBody),
+    dead: false,
+    deadAt: 0,
   };
   aiSnakes = [
-    { id: "candy", body: makeStartBody(5, 5, "right", 3), dir: "right", skinId: "candy", respawn: 0 },
-    { id: "tiger", body: makeStartBody(19, 7, "left", 3), dir: "left", skinId: "tiger", respawn: 0 },
-    { id: "jungle", body: makeStartBody(8, 20, "up", 3), dir: "up", skinId: "jungle", respawn: 0 },
+    { id: "candy", body: aiStartBodies[0], previousBody: cloneBody(aiStartBodies[0]), dir: "right", skinId: "candy", respawn: 0 },
+    { id: "tiger", body: aiStartBodies[1], previousBody: cloneBody(aiStartBodies[1]), dir: "left", skinId: "tiger", respawn: 0 },
+    { id: "jungle", body: aiStartBodies[2], previousBody: cloneBody(aiStartBodies[2]), dir: "up", skinId: "jungle", respawn: 0 },
   ];
   foods = [];
   lastFoodId = "";
   shuffleFoods();
   direction = dirs.right;
   nextDirection = dirs.right;
+  activePointerId = null;
+  smoothedTouchDirection = null;
+  touchAnchor = null;
+  lastPlayerHead = { ...playerBody[0] };
+  renderAlpha = 1;
   cameraReady = false;
   spatialCache = createSpatialCache();
   score.value = 0;
   paused.value = false;
-  gameEnded.value = false;
-  gameOver = false;
   status.value = "争夺能量核心";
   for (let i = 0; i < FOOD_TARGET; i += 1) spawnFood();
   stateTick += 1;
   draw();
+  ensureLoop();
 
   // 游戏开始时自动进入全屏
   if (!isFullscreen.value) {
@@ -287,42 +332,58 @@ function restart() {
 
 function setDirection(name) {
   const dir = dirs[name];
-  if (!dir || gameOver) return;
-  nextDirection = normalizeDirection(dir);
+  if (!dir || player?.dead) return;
+  const target = normalizeDirection(dir);
+  // 防止方向键一键反向（与当前方向夹角接近 180°时忽略），呼应移动端的转向限制
+  if (target.x * direction.x + target.y * direction.y < -0.5) return;
+  nextDirection = target;
 }
 
-function setFreeDirectionFromPoint(clientX, clientY) {
-  if (!canvas.value || gameOver) return;
+// 根据触摸起始锚点到当前点的滑动向量决定方向：
+// 只有当手指相对按下位置发生了足够滑动时才转向，纯点击（无滑动）保持原方向。
+function setDirectionFromSwipe(clientX, clientY) {
+  if (!canvas.value || player?.dead || !touchAnchor) return;
   const rect = canvas.value.getBoundingClientRect();
-  const head = player?.body?.[0];
-  const headScreen = head
-    ? worldToScreen(head, camera)
-    : {
-        x: rect.width / 2,
-        y: rect.height / 2,
-      };
-  const dx = clientX - rect.left - headScreen.x;
-  const dy = clientY - rect.top - headScreen.y;
-  if (Math.hypot(dx, dy) < TOUCH_DIRECTION_DEADZONE) return;
-  nextDirection = normalizeDirection({ x: dx, y: dy });
+  const dx = clientX - rect.left - touchAnchor.x;
+  const dy = clientY - rect.top - touchAnchor.y;
+  if (Math.hypot(dx, dy) < TOUCH_DIRECTION_DEADZONE) return; // 未发生滑动，保持原方向
+  const targetDirection = normalizeDirection({ x: dx, y: dy });
+  smoothedTouchDirection = smoothedTouchDirection
+    ? normalizeDirection({
+        x: smoothedTouchDirection.x + (targetDirection.x - smoothedTouchDirection.x) * TOUCH_DIRECTION_SMOOTHING,
+        y: smoothedTouchDirection.y + (targetDirection.y - smoothedTouchDirection.y) * TOUCH_DIRECTION_SMOOTHING,
+      })
+    : targetDirection;
+  // 限制单次转角，避免猛地大角度调头
+  nextDirection = limitTurn(smoothedTouchDirection, direction);
 }
 
-function onTouchStart(event) {
-  const touch = event.touches[0];
-  if (!touch) return;
-  setFreeDirectionFromPoint(touch.clientX, touch.clientY);
+function onPointerDown(event) {
+  if (player?.dead) return;
+  event.preventDefault();
+  activePointerId = event.pointerId;
+  const rect = canvas.value.getBoundingClientRect();
+  // 仅记录按下锚点并以当前方向为平滑起点；按下本身不转向，等待用户滑动
+  touchAnchor = { x: event.clientX - rect.left, y: event.clientY - rect.top };
+  smoothedTouchDirection = { ...direction };
+  event.currentTarget.setPointerCapture?.(event.pointerId);
 }
 
-function onTouchMove(event) {
-  const touch = event.touches[0];
-  if (!touch) return;
-  setFreeDirectionFromPoint(touch.clientX, touch.clientY);
+function onPointerMove(event) {
+  if (activePointerId !== event.pointerId || player?.dead) return;
+  event.preventDefault();
+  setDirectionFromSwipe(event.clientX, event.clientY);
 }
 
-function onTouchEnd(event) {
-  const touch = event.changedTouches[0];
-  if (!touch) return;
-  setFreeDirectionFromPoint(touch.clientX, touch.clientY);
+function onPointerEnd(event) {
+  if (activePointerId === event.pointerId) activePointerId = null;
+  touchAnchor = null;
+  smoothedTouchDirection = null;
+  try {
+    event.currentTarget.releasePointerCapture?.(event.pointerId);
+  } catch {
+    // 浏览器可能已自动释放指针捕获
+  }
 }
 
 function inBounds(point) {
@@ -333,6 +394,7 @@ function killAi(snake) {
   score.value += 50;
   best.value = setBestScore("snake-arena", score.value);
   snake.body = [];
+  snake.previousBody = [];
   snake.respawn = 18;
 }
 
@@ -343,11 +405,74 @@ function respawnAi(snake, index) {
     makeStartBody(8, 20, "up", 3),
   ];
   snake.body = starts[index].map((part) => ({ ...part }));
+  snake.previousBody = cloneBody(snake.body);
   snake.dir = index === 1 ? "left" : index === 2 ? "up" : "right";
   snake.respawn = 0;
 }
 
+// 将死亡蛇身沿长度均匀采样成若干食物，长度越长掉落越多（上限 FOOD_CHAIN_MAX）
+function spawnFoodChainFromBody(body) {
+  if (!body?.length) return;
+  const count = clamp(Math.floor(body.length / FOOD_CHAIN_STRIDE), 1, FOOD_CHAIN_MAX);
+  for (let i = 0; i < count; i += 1) {
+    const part = body[Math.min(body.length - 1, Math.floor((i / count) * body.length))];
+    if (!part) continue;
+    foods.push({
+      x: clamp(Math.round(part.x), 0, grid - 1),
+      y: clamp(Math.round(part.y), 0, grid - 1),
+      value: i % 4 === 0 ? 30 : 10, // 间隔掉落高能量食物，鼓励其它蛇争夺
+      asset: nextFoodAsset(),
+    });
+  }
+}
+
+// 玩家死亡：身体按长度散落成一条食物链，随后进入待复活状态（不再弹窗结束）
+function killPlayer() {
+  best.value = setBestScore("snake-arena", score.value);
+  if (player.body[0]) lastPlayerHead = { ...player.body[0] };
+  spawnFoodChainFromBody(player.body);
+  player.body = [];
+  player.previousBody = [];
+  player.dead = true;
+  player.deadAt = frameNow;
+  activePointerId = null;
+  touchAnchor = null;
+  smoothedTouchDirection = null;
+  status.value = "能量核心碎裂，3 秒后重生";
+}
+
+// 在世界内随机寻找一个不与其它蛇重叠的安全出生点
+function findRespawnSpot() {
+  const margin = 14;
+  for (let attempt = 0; attempt < 80; attempt += 1) {
+    const headX = margin + Math.floor(Math.random() * (grid - margin * 2));
+    const headY = margin + Math.floor(Math.random() * (grid - margin * 2));
+    const dirName = DIR_NAMES[Math.floor(Math.random() * DIR_NAMES.length)];
+    const body = makeBodyAt(headX, headY, dirName, 4);
+    if (body.every((part) => inBounds(part) && !segmentHit(part))) {
+      return { body, dirName };
+    }
+  }
+  return { body: makeBodyAt(Math.floor(grid / 2), Math.floor(grid / 2), "right", 4), dirName: "right" };
+}
+
+// 在随机安全地点复活玩家：身体与分数重置，相机重新定位到新出生点
+function respawnPlayer() {
+  const spot = findRespawnSpot();
+  player.body = spot.body;
+  player.previousBody = cloneBody(spot.body);
+  player.dead = false;
+  player.deadAt = 0;
+  direction = dirs[spot.dirName];
+  nextDirection = { ...direction };
+  lastPlayerHead = { ...spot.body[0] };
+  cameraReady = false;
+  score.value = 0;
+  status.value = "争夺能量核心";
+}
+
 function movePlayer() {
+  snapshotSnake(player);
   direction = nextDirection;
   const head = {
     x: player.body[0].x + direction.x,
@@ -356,19 +481,17 @@ function movePlayer() {
   const hitsSelf = player.body.slice(7).some((part) => same(part, head));
   const hitsAi = aiSnakes.some((snake) => snake.body.some((part) => same(part, head)));
   if (!inBounds(head) || hitsSelf || hitsAi) {
-    gameOver = true;
-    gameEnded.value = true;
-    status.value = "本局结束";
-    best.value = setBestScore("snake-arena", score.value);
+    killPlayer();
     return;
   }
   player.body.unshift(head);
+  lastPlayerHead = head;
   const foodIndex = foods.findIndex((food) => distanceSquared(food, head) <= FOOD_PICKUP_RADIUS_SQUARED);
   if (foodIndex >= 0) {
     const [food] = foods.splice(foodIndex, 1);
     score.value += food.value;
     best.value = setBestScore("snake-arena", score.value);
-    spawnFood();
+    if (foods.length < FOOD_TARGET) spawnFood();
   } else {
     player.body.pop();
   }
@@ -397,6 +520,7 @@ function chooseAiDirection(snake) {
 
 function moveAi() {
   aiSnakes.forEach((snake, index) => {
+    snapshotSnake(snake);
     if (snake.respawn > 0) {
       snake.respawn -= 1;
       if (snake.respawn === 0) respawnAi(snake, index);
@@ -414,7 +538,7 @@ function moveAi() {
     const foodIndex = foods.findIndex((food) => distanceSquared(food, head) <= FOOD_PICKUP_RADIUS_SQUARED);
     if (foodIndex >= 0) {
       foods.splice(foodIndex, 1);
-      spawnFood();
+      if (foods.length < FOOD_TARGET) spawnFood();
     } else {
       snake.body.pop();
     }
@@ -422,20 +546,24 @@ function moveAi() {
 }
 
 function step() {
-  if (paused.value || gameOver) return;
-  movePlayer();
-  if (!gameOver) moveAi();
+  if (paused.value) return;
+  if (player.dead) {
+    if (frameNow - player.deadAt >= RESPAWN_DELAY) respawnPlayer();
+  } else {
+    movePlayer();
+  }
+  moveAi();
   stateTick += 1;
 }
 
-function roundedRect(x, y, width, height, radius) {
-  ctx.beginPath();
-  ctx.moveTo(x + radius, y);
-  ctx.arcTo(x + width, y, x + width, y + height, radius);
-  ctx.arcTo(x + width, y + height, x, y + height, radius);
-  ctx.arcTo(x, y + height, x, y, radius);
-  ctx.arcTo(x, y, x + width, y, radius);
-  ctx.closePath();
+function roundedRect(x, y, width, height, radius, c = ctx) {
+  c.beginPath();
+  c.moveTo(x + radius, y);
+  c.arcTo(x + width, y, x + width, y + height, radius);
+  c.arcTo(x + width, y + height, x, y + height, radius);
+  c.arcTo(x, y + height, x, y, radius);
+  c.arcTo(x, y, x + width, y, radius);
+  c.closePath();
 }
 
 function worldSize() {
@@ -467,7 +595,7 @@ function syncCanvasSize() {
 
 function targetCameraOffset(boardWidth, boardHeight) {
   const world = worldSize();
-  const head = player?.body?.[0];
+  const head = player?.body?.[0] || lastPlayerHead;
   const target = head
     ? {
         x: head.x * CELL_SIZE + CELL_SIZE / 2 - boardWidth / 2,
@@ -781,111 +909,111 @@ function drawBoundaryWarning(boardWidth, boardHeight) {
   ctx.restore();
 }
 
-function drawSkinPattern(skin, x, y, partSize, index) {
+function drawSkinPattern(skin, x, y, partSize, index, c = ctx) {
   const cx = x + partSize / 2;
   const cy = y + partSize / 2;
-  ctx.save();
-  ctx.globalAlpha = 0.86;
-  ctx.strokeStyle = skin.bodyAlt;
-  ctx.fillStyle = skin.bodyAlt;
-  ctx.lineWidth = Math.max(1, partSize * 0.08);
+  c.save();
+  c.globalAlpha = 0.86;
+  c.strokeStyle = skin.bodyAlt;
+  c.fillStyle = skin.bodyAlt;
+  c.lineWidth = Math.max(1, partSize * 0.08);
 
   if (skin.pattern === "circuits") {
-    ctx.beginPath();
-    ctx.moveTo(x + partSize * 0.22, cy);
-    ctx.lineTo(x + partSize * 0.78, cy);
-    ctx.moveTo(cx, y + partSize * 0.26);
-    ctx.lineTo(cx, y + partSize * 0.46);
-    ctx.stroke();
-    ctx.beginPath();
-    ctx.arc(x + partSize * 0.78, cy, partSize * 0.08, 0, Math.PI * 2);
-    ctx.fill();
+    c.beginPath();
+    c.moveTo(x + partSize * 0.22, cy);
+    c.lineTo(x + partSize * 0.78, cy);
+    c.moveTo(cx, y + partSize * 0.26);
+    c.lineTo(cx, y + partSize * 0.46);
+    c.stroke();
+    c.beginPath();
+    c.arc(x + partSize * 0.78, cy, partSize * 0.08, 0, Math.PI * 2);
+    c.fill();
   }
 
   if (skin.pattern === "cracks") {
-    ctx.beginPath();
-    ctx.moveTo(x + partSize * 0.24, y + partSize * 0.24);
-    ctx.lineTo(cx, cy);
-    ctx.lineTo(x + partSize * 0.7, y + partSize * 0.76);
-    ctx.stroke();
+    c.beginPath();
+    c.moveTo(x + partSize * 0.24, y + partSize * 0.24);
+    c.lineTo(cx, cy);
+    c.lineTo(x + partSize * 0.7, y + partSize * 0.76);
+    c.stroke();
   }
 
   if (skin.pattern === "snow") {
-    ctx.lineWidth = Math.max(1, partSize * 0.06);
-    ctx.beginPath();
-    ctx.moveTo(cx - partSize * 0.18, cy);
-    ctx.lineTo(cx + partSize * 0.18, cy);
-    ctx.moveTo(cx, cy - partSize * 0.18);
-    ctx.lineTo(cx, cy + partSize * 0.18);
-    ctx.stroke();
+    c.lineWidth = Math.max(1, partSize * 0.06);
+    c.beginPath();
+    c.moveTo(cx - partSize * 0.18, cy);
+    c.lineTo(cx + partSize * 0.18, cy);
+    c.moveTo(cx, cy - partSize * 0.18);
+    c.lineTo(cx, cy + partSize * 0.18);
+    c.stroke();
   }
 
   if (skin.pattern === "leaves") {
-    ctx.save();
-    ctx.translate(cx, cy);
-    ctx.rotate(index % 2 ? -0.65 : 0.65);
-    ctx.beginPath();
-    ctx.ellipse(0, 0, partSize * 0.2, partSize * 0.09, 0, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.restore();
+    c.save();
+    c.translate(cx, cy);
+    c.rotate(index % 2 ? -0.65 : 0.65);
+    c.beginPath();
+    c.ellipse(0, 0, partSize * 0.2, partSize * 0.09, 0, 0, Math.PI * 2);
+    c.fill();
+    c.restore();
   }
 
   if (skin.pattern === "gems") {
-    ctx.beginPath();
-    ctx.moveTo(cx, y + partSize * 0.18);
-    ctx.lineTo(x + partSize * 0.72, cy);
-    ctx.lineTo(cx, y + partSize * 0.82);
-    ctx.lineTo(x + partSize * 0.28, cy);
-    ctx.closePath();
-    ctx.fill();
+    c.beginPath();
+    c.moveTo(cx, y + partSize * 0.18);
+    c.lineTo(x + partSize * 0.72, cy);
+    c.lineTo(cx, y + partSize * 0.82);
+    c.lineTo(x + partSize * 0.28, cy);
+    c.closePath();
+    c.fill();
   }
 
   if (skin.pattern === "stripes") {
-    ctx.beginPath();
-    ctx.moveTo(x + partSize * 0.24, y + partSize * 0.82);
-    ctx.lineTo(x + partSize * 0.82, y + partSize * 0.24);
-    ctx.stroke();
+    c.beginPath();
+    c.moveTo(x + partSize * 0.24, y + partSize * 0.82);
+    c.lineTo(x + partSize * 0.82, y + partSize * 0.24);
+    c.stroke();
   }
 
   if (skin.pattern === "stars") {
-    ctx.lineWidth = Math.max(1, partSize * 0.05);
-    ctx.beginPath();
-    ctx.moveTo(cx - partSize * 0.2, cy);
-    ctx.lineTo(cx + partSize * 0.2, cy);
-    ctx.moveTo(cx, cy - partSize * 0.2);
-    ctx.lineTo(cx, cy + partSize * 0.2);
-    ctx.stroke();
-    ctx.beginPath();
-    ctx.arc(cx, cy, partSize * 0.05, 0, Math.PI * 2);
-    ctx.fill();
+    c.lineWidth = Math.max(1, partSize * 0.05);
+    c.beginPath();
+    c.moveTo(cx - partSize * 0.2, cy);
+    c.lineTo(cx + partSize * 0.2, cy);
+    c.moveTo(cx, cy - partSize * 0.2);
+    c.lineTo(cx, cy + partSize * 0.2);
+    c.stroke();
+    c.beginPath();
+    c.arc(cx, cy, partSize * 0.05, 0, Math.PI * 2);
+    c.fill();
   }
 
   if (skin.pattern === "scales") {
-    ctx.globalAlpha = 0.55;
+    c.globalAlpha = 0.55;
     for (let i = 0; i < 3; i += 1) {
-      ctx.beginPath();
-      ctx.arc(x + partSize * (0.28 + i * 0.22), cy, partSize * 0.12, Math.PI, Math.PI * 2);
-      ctx.stroke();
+      c.beginPath();
+      c.arc(x + partSize * (0.28 + i * 0.22), cy, partSize * 0.12, Math.PI, Math.PI * 2);
+      c.stroke();
     }
   }
 
   if (skin.pattern === "tiger") {
-    ctx.lineWidth = Math.max(1.2, partSize * 0.12);
-    ctx.beginPath();
-    ctx.moveTo(x + partSize * 0.2, y + partSize * 0.22);
-    ctx.lineTo(x + partSize * 0.72, y + partSize * 0.76);
-    ctx.stroke();
+    c.lineWidth = Math.max(1.2, partSize * 0.12);
+    c.beginPath();
+    c.moveTo(x + partSize * 0.2, y + partSize * 0.22);
+    c.lineTo(x + partSize * 0.72, y + partSize * 0.76);
+    c.stroke();
   }
 
   if (skin.pattern === "mist") {
-    ctx.globalAlpha = 0.26;
-    ctx.beginPath();
-    ctx.arc(x + partSize * 0.36, y + partSize * 0.36, partSize * 0.2, 0, Math.PI * 2);
-    ctx.arc(x + partSize * 0.68, y + partSize * 0.66, partSize * 0.16, 0, Math.PI * 2);
-    ctx.fill();
+    c.globalAlpha = 0.26;
+    c.beginPath();
+    c.arc(x + partSize * 0.36, y + partSize * 0.36, partSize * 0.2, 0, Math.PI * 2);
+    c.arc(x + partSize * 0.68, y + partSize * 0.66, partSize * 0.16, 0, Math.PI * 2);
+    c.fill();
   }
 
-  ctx.restore();
+  c.restore();
 }
 
 function shouldSimplifySnakePart(index, bodyLength) {
@@ -912,72 +1040,127 @@ function clipVisibleSnakeParts(parts, bodyLength) {
   return [...exact, ...middle.filter((_, index) => index % stride === 0), ...tail].sort((a, b) => b.index - a.index);
 }
 
-function drawSnakePart(part, index, cell, skin, dir, simplified = false) {
+const bodySpriteCache = new Map();
+
+// 预渲染身体段位图（渐变+阴影+高光+图案各做一次），主循环只 drawImage，
+// 避免长蛇每帧每段重复 createLinearGradient + shadowBlur 的高昂开销。
+function getBodySprite(skin, simplified) {
+  const key = `${skin.body}|${skin.bodyAlt}|${skin.glow}|${skin.pattern}|${simplified ? "s" : "n"}`;
+  const cached = bodySpriteCache.get(key);
+  if (cached) return cached;
+
+  const cell = CELL_SIZE;
   const gap = Math.max(0.5, cell * 0.016);
-  const isHead = index === 0;
-  const inset = simplified && !isHead ? cell * 0.08 : 0;
-  const x = part.x * cell + gap + inset;
-  const y = part.y * cell + gap + inset;
+  const inset = simplified ? cell * 0.08 : 0;
   const partSize = cell - gap * 2 - inset * 2;
+  const blur = simplified ? 4 : 11;
+  const pad = Math.ceil(blur + 2);
+  const spriteSize = Math.ceil(partSize + pad * 2);
+  const sprite = document.createElement("canvas");
+  sprite.width = spriteSize;
+  sprite.height = spriteSize;
+  const c = sprite.getContext("2d");
+
+  c.shadowBlur = blur;
+  c.shadowColor = skin.glow;
+  const fill = c.createLinearGradient(pad, pad, pad + partSize, pad + partSize);
+  fill.addColorStop(0, skin.body);
+  fill.addColorStop(1, skin.bodyAlt);
+  c.fillStyle = fill;
+  roundedRect(pad, pad, partSize, partSize, partSize * 0.34, c);
+  c.fill();
+
+  if (!simplified) {
+    c.shadowBlur = 0;
+    c.fillStyle = "rgba(255,255,255,0.22)";
+    roundedRect(pad + partSize * 0.18, pad + partSize * 0.14, partSize * 0.32, partSize * 0.14, partSize * 0.07, c);
+    c.fill();
+    drawSkinPattern(skin, pad, pad, partSize, 0, c);
+  }
+
+  const entry = { canvas: sprite, half: spriteSize / 2 };
+  bodySpriteCache.set(key, entry);
+  return entry;
+}
+
+function drawSnakePart(part, index, cell, skin, dir, simplified = false) {
+  const isHead = index === 0;
+  // 段中心恒为格子中心（与 gap/inset 无关），用于对齐精灵
+  const centerX = part.x * cell + cell / 2;
+  const centerY = part.y * cell + cell / 2;
+
+  // 身体段：直接绘制预渲染的离屏精灵
+  if (!isHead) {
+    const sprite = getBodySprite(skin, simplified);
+    if (simplified) {
+      ctx.save();
+      ctx.globalAlpha = 0.72;
+      ctx.drawImage(sprite.canvas, centerX - sprite.half, centerY - sprite.half);
+      ctx.restore();
+    } else {
+      ctx.drawImage(sprite.canvas, centerX - sprite.half, centerY - sprite.half);
+    }
+    return;
+  }
+
+  // 蛇头：实时绘制（数量少，且眼睛/触角朝向随 dir 变化，无法缓存）
+  const gap = Math.max(0.5, cell * 0.016);
+  const x = part.x * cell + gap;
+  const y = part.y * cell + gap;
+  const partSize = cell - gap * 2;
   const center = { x: x + partSize / 2, y: y + partSize / 2 };
 
   ctx.save();
-  ctx.globalAlpha = simplified && !isHead ? 0.72 : 1;
-  ctx.shadowBlur = isHead ? 18 : simplified ? 4 : 11;
-  ctx.shadowColor = isHead ? skin.head : skin.glow;
+  ctx.shadowBlur = 18;
+  ctx.shadowColor = skin.head;
   const fill = ctx.createLinearGradient(x, y, x + partSize, y + partSize);
-  fill.addColorStop(0, isHead ? skin.head : skin.body);
+  fill.addColorStop(0, skin.head);
   fill.addColorStop(1, skin.bodyAlt);
   ctx.fillStyle = fill;
-  roundedRect(x, y, partSize, partSize, isHead ? partSize * 0.42 : partSize * 0.34);
+  roundedRect(x, y, partSize, partSize, partSize * 0.42);
   ctx.fill();
 
-  if (!simplified || isHead) {
-    ctx.shadowBlur = 0;
-    ctx.fillStyle = "rgba(255,255,255,0.22)";
-    roundedRect(x + partSize * 0.18, y + partSize * 0.14, partSize * 0.32, partSize * 0.14, partSize * 0.07);
-    ctx.fill();
-    if (!isHead) drawSkinPattern(skin, x, y, partSize, index);
-  }
+  ctx.shadowBlur = 0;
+  ctx.fillStyle = "rgba(255,255,255,0.22)";
+  roundedRect(x + partSize * 0.18, y + partSize * 0.14, partSize * 0.32, partSize * 0.14, partSize * 0.07);
+  ctx.fill();
 
-  if (isHead) {
-    const forward = dir || dirs.right;
-    const side = { x: -forward.y, y: forward.x };
-    const eyeForward = partSize * 0.2;
-    const eyeSide = partSize * 0.18;
-    const eyeRadius = Math.max(1.8, partSize * 0.09);
-    const eyes = [-1, 1].map((sign) => ({
-      x: center.x + forward.x * eyeForward + side.x * eyeSide * sign,
-      y: center.y + forward.y * eyeForward + side.y * eyeSide * sign,
-    }));
-    ctx.fillStyle = skin.eye;
-    eyes.forEach((eye) => {
-      ctx.beginPath();
-      ctx.arc(eye.x, eye.y, eyeRadius, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.fillStyle = "rgba(255,255,255,0.78)";
-      ctx.beginPath();
-      ctx.arc(eye.x + eyeRadius * 0.25, eye.y - eyeRadius * 0.25, eyeRadius * 0.32, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.fillStyle = skin.eye;
-    });
-
-    ctx.strokeStyle = skin.bodyAlt;
-    ctx.lineWidth = Math.max(1, partSize * 0.08);
-    ctx.lineCap = "round";
+  const forward = dir || dirs.right;
+  const side = { x: -forward.y, y: forward.x };
+  const eyeForward = partSize * 0.2;
+  const eyeSide = partSize * 0.18;
+  const eyeRadius = Math.max(1.8, partSize * 0.09);
+  const eyes = [-1, 1].map((sign) => ({
+    x: center.x + forward.x * eyeForward + side.x * eyeSide * sign,
+    y: center.y + forward.y * eyeForward + side.y * eyeSide * sign,
+  }));
+  ctx.fillStyle = skin.eye;
+  eyes.forEach((eye) => {
     ctx.beginPath();
-    ctx.moveTo(center.x + forward.x * partSize * 0.42, center.y + forward.y * partSize * 0.42);
-    ctx.lineTo(
-      center.x + forward.x * partSize * 0.62 + side.x * partSize * 0.15,
-      center.y + forward.y * partSize * 0.62 + side.y * partSize * 0.15,
-    );
-    ctx.moveTo(center.x + forward.x * partSize * 0.42, center.y + forward.y * partSize * 0.42);
-    ctx.lineTo(
-      center.x + forward.x * partSize * 0.62 - side.x * partSize * 0.15,
-      center.y + forward.y * partSize * 0.62 - side.y * partSize * 0.15,
-    );
-    ctx.stroke();
-  }
+    ctx.arc(eye.x, eye.y, eyeRadius, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = "rgba(255,255,255,0.78)";
+    ctx.beginPath();
+    ctx.arc(eye.x + eyeRadius * 0.25, eye.y - eyeRadius * 0.25, eyeRadius * 0.32, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = skin.eye;
+  });
+
+  ctx.strokeStyle = skin.bodyAlt;
+  ctx.lineWidth = Math.max(1, partSize * 0.08);
+  ctx.lineCap = "round";
+  ctx.beginPath();
+  ctx.moveTo(center.x + forward.x * partSize * 0.42, center.y + forward.y * partSize * 0.42);
+  ctx.lineTo(
+    center.x + forward.x * partSize * 0.62 + side.x * partSize * 0.15,
+    center.y + forward.y * partSize * 0.62 + side.y * partSize * 0.15,
+  );
+  ctx.moveTo(center.x + forward.x * partSize * 0.42, center.y + forward.y * partSize * 0.42);
+  ctx.lineTo(
+    center.x + forward.x * partSize * 0.62 - side.x * partSize * 0.15,
+    center.y + forward.y * partSize * 0.62 - side.y * partSize * 0.15,
+  );
+  ctx.stroke();
 
   ctx.restore();
 }
@@ -1024,6 +1207,18 @@ function drawFood(food, cell) {
   ctx.restore();
 }
 
+function interpolatedPart(snake, part) {
+  if (renderAlpha >= 0.99) return part;
+  const previous = snake.previousBody;
+  const from = previous?.[Math.max(0, part.index - 1)];
+  if (!from) return part;
+  return {
+    ...part,
+    x: from.x + (part.x - from.x) * renderAlpha,
+    y: from.y + (part.y - from.y) * renderAlpha,
+  };
+}
+
 function drawSnake(snake, isPlayer = false, cameraView = camera, boardWidth = size, boardHeight = size) {
   const skin = isPlayer ? selectedSkin.value : getSnakeSkinById(snake.skinId);
   const dir = isPlayer ? direction : dirs[snake.dir];
@@ -1031,7 +1226,8 @@ function drawSnake(snake, isPlayer = false, cameraView = camera, boardWidth = si
   const bodyLength = snake.body?.length || 0;
   const parts = queryBuckets(buckets, cameraView, boardWidth, boardHeight)
     .filter((part) => isPointVisible(part, cameraView, boardWidth, boardHeight))
-    .sort((a, b) => b.index - a.index);
+    .sort((a, b) => b.index - a.index)
+    .map((part) => interpolatedPart(snake, part));
   clipVisibleSnakeParts(parts, bodyLength).forEach((part) => {
     drawSnakePart(part, part.index, CELL_SIZE, skin, dir, shouldSimplifySnakePart(part.index, bodyLength));
   });
@@ -1084,12 +1280,33 @@ function draw() {
   ctx.shadowBlur = 0;
 }
 
+function tickInterval() {
+  return Math.max(82, 138 - score.value * 0.04);
+}
+
 function loop(time) {
-  if (time - lastTick > Math.max(82, 138 - score.value * 0.04)) {
+  if (paused.value) {
+    loopId = 0; // 暂停时停止循环，恢复由 ensureLoop 重启，避免空转
+    return;
+  }
+  frameNow = time;
+  const interval = tickInterval();
+  if (!lastTick) lastTick = time;
+  if (time - lastTick > Math.max(interval, 240)) lastTick = time - interval;
+
+  if (time - lastTick >= interval) {
     step();
-    draw();
     lastTick = time;
   }
+  renderAlpha = clamp((time - lastTick) / interval, 0, 1);
+  draw();
+  loopId = requestAnimationFrame(loop);
+}
+
+// 幂等启动主循环：仅在未运行时启动，避免重复 rAF
+function ensureLoop() {
+  if (loopId) return;
+  lastTick = 0;
   loopId = requestAnimationFrame(loop);
 }
 
@@ -1103,15 +1320,9 @@ function resize() {
 }
 
 function togglePause() {
-  if (gameOver) return;
   paused.value = !paused.value;
   status.value = paused.value ? "已暂停" : "继续争夺能量核心";
-}
-
-function exitGame() {
-  if (isFullscreen.value) exitFullscreen();
-  const fromTab = Array.isArray(route.query.fromTab) ? route.query.fromTab[0] : route.query.fromTab;
-  router.push(typeof fromTab === "string" && homeTabIds.has(fromTab) ? { path: "/", query: { tab: fromTab } } : "/");
+  if (!paused.value) ensureLoop();
 }
 
 function onKey(event) {
@@ -1123,7 +1334,7 @@ function onKey(event) {
 }
 
 onMounted(() => {
-  ctx = canvas.value.getContext("2d");
+  ctx = canvas.value.getContext("2d", { alpha: false });
   canvas.value.width = size;
   canvas.value.height = size;
   restart();
@@ -1136,7 +1347,7 @@ onMounted(() => {
   document.addEventListener("webkitfullscreenchange", onFullscreenChange);
   document.addEventListener("mozfullscreenchange", onFullscreenChange);
   document.addEventListener("msfullscreenchange", onFullscreenChange);
-  loopId = requestAnimationFrame(loop);
+  ensureLoop();
 });
 
 onUnmounted(() => {
@@ -1173,12 +1384,7 @@ onUnmounted(() => {
         <Minimize v-if="isFullscreen" :size="20" />
         <Maximize v-else :size="20" />
       </button>
-      <div
-        class="board-shell arena-board-shell"
-        @touchstart.prevent="onTouchStart"
-        @touchmove.prevent="onTouchMove"
-        @touchend.prevent="onTouchEnd"
-      >
+      <div class="board-shell arena-board-shell">
         <details
           class="arena-skin-drawer"
           @click.stop
@@ -1208,21 +1414,15 @@ onUnmounted(() => {
             </button>
           </div>
         </details>
-        <canvas ref="canvas" class="canvas-board arena-canvas" aria-label="贪吃蛇大作战游戏画布"></canvas>
-        <div v-if="gameEnded" class="arena-death-backdrop" role="dialog" aria-modal="true" aria-label="游戏结束">
-          <section class="arena-death-modal">
-            <p>本局结束</p>
-            <h2>撞毁了</h2>
-            <div class="arena-death-stats">
-              <span>分数 <strong>{{ score }}</strong></span>
-              <span>最佳 <strong>{{ best }}</strong></span>
-            </div>
-            <div class="arena-death-actions">
-              <button class="pill-button primary" type="button" @click="restart">重开</button>
-              <button class="pill-button" type="button" @click="exitGame">退出</button>
-            </div>
-          </section>
-        </div>
+        <canvas
+          ref="canvas"
+          class="canvas-board arena-canvas"
+          aria-label="贪吃蛇大作战游戏画布"
+          @pointerdown="onPointerDown"
+          @pointermove="onPointerMove"
+          @pointerup="onPointerEnd"
+          @pointercancel="onPointerEnd"
+        ></canvas>
       </div>
     </section>
   </GameLayout>
@@ -1308,6 +1508,7 @@ onUnmounted(() => {
   height: 100%;
   max-height: none;
   min-height: 0;
+  touch-action: none;
 }
 
 .is-fullscreen .arena-canvas {
@@ -1362,78 +1563,6 @@ onUnmounted(() => {
 
 .arena-skin-drawer[open] .drawer-chevron {
   transform: rotate(180deg);
-}
-
-.arena-death-backdrop {
-  position: absolute;
-  inset: 0;
-  z-index: 20;
-  display: grid;
-  place-items: center;
-  padding: 18px;
-  background:
-    radial-gradient(circle at 50% 42%, rgba(255, 92, 124, 0.18), transparent 38%),
-    rgba(2, 6, 17, 0.68);
-  backdrop-filter: blur(5px);
-}
-
-.arena-death-modal {
-  width: min(320px, 100%);
-  padding: 20px;
-  border: 1px solid rgba(145, 235, 255, 0.28);
-  border-radius: var(--radius);
-  background: rgba(6, 13, 28, 0.94);
-  box-shadow:
-    0 22px 58px rgba(0, 0, 0, 0.42),
-    inset 0 0 28px rgba(83, 243, 255, 0.08);
-  text-align: center;
-}
-
-.arena-death-modal p,
-.arena-death-modal h2 {
-  margin: 0;
-}
-
-.arena-death-modal p {
-  color: var(--danger);
-  font-size: 0.82rem;
-  font-weight: 900;
-}
-
-.arena-death-modal h2 {
-  margin-top: 6px;
-  font-size: 1.55rem;
-}
-
-.arena-death-stats {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 8px;
-  margin-top: 16px;
-}
-
-.arena-death-stats span {
-  display: grid;
-  gap: 4px;
-  min-width: 0;
-  padding: 10px;
-  border: 1px solid rgba(145, 235, 255, 0.18);
-  border-radius: var(--radius);
-  background: rgba(3, 8, 18, 0.52);
-  color: var(--muted);
-  font-size: 0.78rem;
-}
-
-.arena-death-stats strong {
-  color: var(--cyan);
-  font-size: 1.15rem;
-}
-
-.arena-death-actions {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 8px;
-  margin-top: 16px;
 }
 
 .arena-skin-grid {

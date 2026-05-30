@@ -11,6 +11,7 @@ const best = ref(getBestScore("plane-war"));
 const status = ref("穿梭弹幕");
 const paused = ref(false);
 const progressVersion = ref(0);
+const invincible = ref(false);
 const shieldCharges = ref(9);
 const bombCharges = ref(9);
 const focusCharges = ref(9);
@@ -301,6 +302,7 @@ function restart() {
   droneFrames = 0;
   shieldHitFrame = 0;
   lastBgUpdate = 0;
+  invincible.value = false;
   shieldCharges.value = 9;
   bombCharges.value = 9;
   focusCharges.value = 9;
@@ -533,6 +535,17 @@ function update() {
       spawnExplosion(hitEnemy.x, hitEnemy.y, fighterSkins[hitEnemy.skin % fighterSkins.length].glow, 30);
     }
     if (hitBullet) hitBullet.y = height + 100;
+    if (invincible.value) {
+      if (hitEnemy) {
+        kills += 1;
+        score.value += variantEffect === "elite-rush" ? 30 : 20;
+        best.value = setBestScore("plane-war", score.value);
+        syncProgress();
+      }
+      shieldHitFrame = 18;
+      status.value = "无敌护航";
+      return;
+    }
     hitsTaken += 1;
     player.lives -= 1;
     shieldHitFrame = 30;
@@ -832,6 +845,27 @@ function draw() {
 
       ctx.restore();
     }
+
+    if (invincible.value) {
+      const skin = fighterSkins[player.skin % fighterSkins.length];
+      const pulse = 0.7 + Math.sin(frame / 8) * 0.3;
+
+      ctx.save();
+      ctx.globalAlpha = 0.72;
+      ctx.strokeStyle = skin.glow;
+      ctx.lineWidth = 3;
+      ctx.shadowBlur = 24;
+      ctx.shadowColor = skin.glow;
+      ctx.beginPath();
+      ctx.arc(player.x, player.y, player.r + 18 + pulse * 4, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.globalAlpha = 0.2;
+      ctx.fillStyle = skin.glow;
+      ctx.beginPath();
+      ctx.arc(player.x, player.y, player.r + 17, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    }
   }
 
   // UI文字（优化样式）
@@ -853,6 +887,9 @@ function draw() {
   }
   if (laserFrames > 0) {
     ctx.fillText("LASER", statusX, 30);
+  }
+  if (invincible.value) {
+    ctx.fillText("INVINCIBLE", width - 138, 56);
   }
 
   if (slowFrames > 0) ctx.fillText("SLOW", 20, 56);
@@ -956,6 +993,12 @@ function useDrone() {
   droneCharges.value -= 1;
   droneFrames = 420;
   status.value = "\u50da\u673a\u4e0a\u7ebf";
+}
+
+function toggleInvincible() {
+  if (finished) return;
+  invincible.value = !invincible.value;
+  status.value = invincible.value ? "无敌开启" : "无敌关闭";
 }
 
 // 优化的游戏循环（帧率控制）
@@ -1092,6 +1135,18 @@ onUnmounted(() => {
             <span>{{ skill.charges.value }}</span>
           </button>
         </div>
+        <button
+          class="plane-invincible-button"
+          :class="{ active: invincible }"
+          type="button"
+          :aria-pressed="invincible"
+          aria-label="切换无敌"
+          :title="invincible ? '关闭无敌' : '开启无敌'"
+          @click="toggleInvincible"
+        >
+          <Shield :size="16" />
+          <span>{{ invincible ? "无敌中" : "无敌" }}</span>
+        </button>
       </aside>
     </section>
   </GameLayout>
@@ -1172,5 +1227,32 @@ onUnmounted(() => {
   font-weight: 900;
   line-height: 14px;
   text-align: center;
+}
+
+.plane-invincible-button {
+  display: inline-flex;
+  width: 100%;
+  min-height: 38px;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  border: 1px solid rgba(145, 235, 255, 0.3);
+  border-radius: var(--radius);
+  background: rgba(6, 13, 28, 0.82);
+  color: #ecfeff;
+  font-weight: 900;
+  cursor: pointer;
+}
+
+.plane-invincible-button:hover {
+  border-color: rgba(83, 243, 255, 0.78);
+  background: rgba(83, 243, 255, 0.14);
+}
+
+.plane-invincible-button.active {
+  border-color: rgba(255, 209, 102, 0.86);
+  background: linear-gradient(135deg, rgba(255, 209, 102, 0.24), rgba(83, 243, 255, 0.18));
+  box-shadow: 0 0 18px rgba(255, 209, 102, 0.22);
+  color: #fff7d6;
 }
 </style>

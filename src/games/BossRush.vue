@@ -284,6 +284,7 @@ function restart() {
   runResult.value = null;
   finished = false;
   startStage(0);
+  ensureLoop();
 }
 
 function distance(a, b) {
@@ -727,36 +728,64 @@ function drawPlayerBullet(bullet) {
   ctx.restore();
 }
 
+const bossBulletSpriteCache = new Map();
+
+// 预渲染圆形 Boss 子弹（径向渐变+阴影各一次），主循环只 drawImage；
+// 圆形旋转无影响，故省去 translate/rotate，消除每颗每帧的 createRadialGradient+shadowBlur。
+function getOrbSprite(color, core, r) {
+  const rr = Math.max(1, Math.round(r));
+  const key = `${color}|${core}|${rr}`;
+  const cached = bossBulletSpriteCache.get(key);
+  if (cached) return cached;
+  const blur = 17;
+  const radius = rr * 1.18;
+  const half = Math.ceil(radius + blur + 4);
+  const sprite = document.createElement("canvas");
+  sprite.width = half * 2;
+  sprite.height = half * 2;
+  const c = sprite.getContext("2d");
+  c.translate(half, half);
+  c.shadowBlur = blur;
+  c.shadowColor = color;
+  const orb = c.createRadialGradient(-rr * 0.28, -rr * 0.32, 0, 0, 0, rr * 1.55);
+  orb.addColorStop(0, core);
+  orb.addColorStop(0.42, color);
+  orb.addColorStop(1, "rgba(255, 92, 124, 0.08)");
+  c.fillStyle = orb;
+  c.beginPath();
+  c.arc(0, 0, radius, 0, Math.PI * 2);
+  c.fill();
+  const entry = { canvas: sprite, half };
+  bossBulletSpriteCache.set(key, entry);
+  return entry;
+}
+
 function drawBossBullet(bullet) {
+  // 圆形子弹（弹幕主体）：用预渲染精灵
+  if (bullet.type !== "diamond") {
+    const sprite = getOrbSprite(bullet.color, bullet.core, bullet.r);
+    ctx.drawImage(sprite.canvas, bullet.x - sprite.half, bullet.y - sprite.half);
+    return;
+  }
+
+  // 菱形子弹：保留实时绘制（带旋转）
   ctx.save();
   ctx.translate(bullet.x, bullet.y);
   ctx.rotate(bullet.spin);
   ctx.shadowBlur = 17;
   ctx.shadowColor = bullet.color;
-
-  if (bullet.type === "diamond") {
-    ctx.fillStyle = bullet.color;
-    ctx.beginPath();
-    ctx.moveTo(0, -bullet.r * 1.6);
-    ctx.lineTo(bullet.r * 1.1, 0);
-    ctx.lineTo(0, bullet.r * 1.6);
-    ctx.lineTo(-bullet.r * 1.1, 0);
-    ctx.closePath();
-    ctx.fill();
-    ctx.fillStyle = bullet.core;
-    ctx.beginPath();
-    ctx.arc(0, 0, bullet.r * 0.45, 0, Math.PI * 2);
-    ctx.fill();
-  } else {
-    const orb = ctx.createRadialGradient(-bullet.r * 0.28, -bullet.r * 0.32, 0, 0, 0, bullet.r * 1.55);
-    orb.addColorStop(0, bullet.core);
-    orb.addColorStop(0.42, bullet.color);
-    orb.addColorStop(1, "rgba(255, 92, 124, 0.08)");
-    ctx.fillStyle = orb;
-    ctx.beginPath();
-    ctx.arc(0, 0, bullet.r * 1.18, 0, Math.PI * 2);
-    ctx.fill();
-  }
+  ctx.fillStyle = bullet.color;
+  ctx.beginPath();
+  ctx.moveTo(0, -bullet.r * 1.6);
+  ctx.lineTo(bullet.r * 1.1, 0);
+  ctx.lineTo(0, bullet.r * 1.6);
+  ctx.lineTo(-bullet.r * 1.1, 0);
+  ctx.closePath();
+  ctx.fill();
+  ctx.fillStyle = bullet.core;
+  ctx.beginPath();
+  ctx.arc(0, 0, bullet.r * 0.45, 0, Math.PI * 2);
+  ctx.fill();
   ctx.restore();
 }
 
@@ -930,17 +959,40 @@ function drawBoss() {
   ctx.restore();
 }
 
+const particleSpriteCache = new Map();
+const PARTICLE_BASE = 10;
+
+// 预渲染粒子基准圆（含阴影），按颜色缓存；绘制时 drawImage 缩放 + globalAlpha，
+// 把每个粒子每帧的 shadowBlur 移到一次性预渲染。
+function getParticleSprite(color) {
+  const cached = particleSpriteCache.get(color);
+  if (cached) return cached;
+  const blur = 12;
+  const half = Math.ceil(PARTICLE_BASE + blur + 4);
+  const sprite = document.createElement("canvas");
+  sprite.width = half * 2;
+  sprite.height = half * 2;
+  const c = sprite.getContext("2d");
+  c.shadowBlur = blur;
+  c.shadowColor = color;
+  c.fillStyle = color;
+  c.beginPath();
+  c.arc(half, half, PARTICLE_BASE, 0, Math.PI * 2);
+  c.fill();
+  const entry = { canvas: sprite, half };
+  particleSpriteCache.set(color, entry);
+  return entry;
+}
+
 function drawParticles() {
   particles.forEach((particle) => {
     const alpha = Math.max(0, particle.life / particle.maxLife);
+    if (alpha <= 0) return;
+    const sprite = getParticleSprite(particle.color);
+    const drawSize = sprite.half * 2 * ((particle.size * alpha) / PARTICLE_BASE);
     ctx.save();
     ctx.globalAlpha = alpha;
-    ctx.shadowBlur = 12;
-    ctx.shadowColor = particle.color;
-    ctx.fillStyle = particle.color;
-    ctx.beginPath();
-    ctx.arc(particle.x, particle.y, particle.size * alpha, 0, Math.PI * 2);
-    ctx.fill();
+    ctx.drawImage(sprite.canvas, particle.x - drawSize / 2, particle.y - drawSize / 2, drawSize, drawSize);
     ctx.restore();
   });
 
@@ -1022,6 +1074,16 @@ function draw() {
 function loop() {
   update();
   draw();
+  if (paused.value || finished) {
+    loopId = 0; // 暂停/结束后停递归（draw 末帧已含 overlay），避免空转全量重绘
+    return;
+  }
+  loopId = requestAnimationFrame(loop);
+}
+
+// 幂等启动主循环：仅在未运行时启动
+function ensureLoop() {
+  if (loopId) return;
   loopId = requestAnimationFrame(loop);
 }
 
@@ -1058,6 +1120,7 @@ function togglePause() {
   if (finished) return;
   paused.value = !paused.value;
   status.value = paused.value ? "已暂停" : "继续挑战首领";
+  if (!paused.value) ensureLoop();
 }
 
 function onKeyDown(event) {
@@ -1073,7 +1136,7 @@ function onKeyUp(event) {
 }
 
 onMounted(() => {
-  ctx = canvas.value.getContext("2d");
+  ctx = canvas.value.getContext("2d", { alpha: false });
   canvas.value.width = width;
   canvas.value.height = height;
   restart();
@@ -1081,7 +1144,7 @@ onMounted(() => {
   window.addEventListener("resize", resize);
   window.addEventListener("keydown", onKeyDown);
   window.addEventListener("keyup", onKeyUp);
-  loopId = requestAnimationFrame(loop);
+  ensureLoop();
 });
 
 onUnmounted(() => {

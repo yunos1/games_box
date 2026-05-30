@@ -938,7 +938,7 @@ function stopRenderLoop() {
 }
 
 onMounted(() => {
-  ctx = canvas.value.getContext("2d");
+  ctx = canvas.value.getContext("2d", { alpha: false });
   syncCanvasSize();
   connect();
   resize();

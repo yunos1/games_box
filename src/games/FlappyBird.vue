@@ -73,6 +73,7 @@ function restart() {
   paused.value = false;
   status.value = "点击跃升";
   draw();
+  ensureLoop();
 }
 
 function flap() {
@@ -203,12 +204,17 @@ function drawBird() {
   ctx.restore();
 }
 
+let bgGradient = null;
+
 function draw() {
   ctx.clearRect(0, 0, width, height);
-  const gradient = ctx.createLinearGradient(0, 0, 0, height);
-  gradient.addColorStop(0, "#07101f");
-  gradient.addColorStop(1, "#020611");
-  ctx.fillStyle = gradient;
+  // 背景渐变坐标/颜色固定，缓存复用，仅 resize 时重建
+  if (!bgGradient) {
+    bgGradient = ctx.createLinearGradient(0, 0, 0, height);
+    bgGradient.addColorStop(0, "#07101f");
+    bgGradient.addColorStop(1, "#020611");
+  }
+  ctx.fillStyle = bgGradient;
   ctx.fillRect(0, 0, width, height);
 
   ctx.strokeStyle = "rgba(83, 243, 255, 0.07)";
@@ -232,6 +238,16 @@ function draw() {
 function loop() {
   update();
   draw();
+  if (paused.value || gameOver) {
+    loopId = 0; // 暂停/结束后停递归，避免空转重绘
+    return;
+  }
+  loopId = requestAnimationFrame(loop);
+}
+
+// 幂等启动主循环：仅在未运行时启动
+function ensureLoop() {
+  if (loopId) return;
   loopId = requestAnimationFrame(loop);
 }
 
@@ -245,6 +261,7 @@ function resize() {
   canvas.value.height = height;
   canvas.value.style.width = "100%";
   canvas.value.style.height = "100%";
+  bgGradient = null; // 尺寸变化后背景渐变失效，下一帧重建
 
   if (!bird) return;
   const xScale = width / previousWidth;
@@ -264,6 +281,7 @@ function togglePause() {
   if (gameOver) return;
   paused.value = !paused.value;
   status.value = paused.value ? "已暂停" : "继续穿越";
+  if (!paused.value) ensureLoop();
 }
 
 function onKey(event) {
@@ -275,12 +293,12 @@ function onKey(event) {
 }
 
 onMounted(() => {
-  ctx = canvas.value.getContext("2d");
+  ctx = canvas.value.getContext("2d", { alpha: false });
   resize();
   restart();
   window.addEventListener("resize", resize);
   window.addEventListener("keydown", onKey);
-  loopId = requestAnimationFrame(loop);
+  ensureLoop();
 });
 
 onUnmounted(() => {

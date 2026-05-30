@@ -115,6 +115,7 @@ function restart() {
         ? "前排砖块已加固"
         : "击碎所有能量砖";
   draw();
+  ensureLoop();
 }
 
 function movePaddleTo(clientX) {
@@ -263,6 +264,16 @@ function useBlastRow() {
 function loop() {
   update();
   draw();
+  if (paused.value || finished) {
+    loopId = 0; // 暂停/结束后停递归，避免空转重绘
+    return;
+  }
+  loopId = requestAnimationFrame(loop);
+}
+
+// 幂等启动主循环：仅在未运行时启动
+function ensureLoop() {
+  if (loopId) return;
   loopId = requestAnimationFrame(loop);
 }
 
@@ -293,6 +304,7 @@ function togglePause() {
   if (finished) return;
   paused.value = !paused.value;
   status.value = paused.value ? "已暂停" : "继续反弹";
+  if (!paused.value) ensureLoop();
 }
 
 function onKeyDown(event) {
@@ -308,7 +320,7 @@ function onKeyUp(event) {
 }
 
 onMounted(() => {
-  ctx = canvas.value.getContext("2d");
+  ctx = canvas.value.getContext("2d", { alpha: false });
   updateBoardSize();
   canvas.value.width = width;
   canvas.value.height = height;
@@ -317,7 +329,7 @@ onMounted(() => {
   window.addEventListener("resize", resize);
   window.addEventListener("keydown", onKeyDown);
   window.addEventListener("keyup", onKeyUp);
-  loopId = requestAnimationFrame(loop);
+  ensureLoop();
 });
 
 onUnmounted(() => {

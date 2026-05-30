@@ -182,6 +182,7 @@ function restart() {
   gameOver = false;
   placeFood();
   draw();
+  ensureLoop();
 
   // 游戏开始时自动进入全屏
   if (!isFullscreen.value) {
@@ -500,12 +501,24 @@ function draw() {
 }
 
 function loop(time) {
+  if (paused.value || gameOver) {
+    loopId = 0; // 暂停/结束时停止循环，恢复由 ensureLoop 重启，避免空转重绘
+    return;
+  }
   const tickSpeed = variantEffect === "turbo" ? 108 : 150;
+  if (!lastTick) lastTick = time;
   if (time - lastTick > tickSpeed) {
     step();
     draw();
     lastTick = time;
   }
+  loopId = requestAnimationFrame(loop);
+}
+
+// 幂等启动主循环：仅在未运行时启动，避免重复 rAF
+function ensureLoop() {
+  if (loopId) return;
+  lastTick = 0;
   loopId = requestAnimationFrame(loop);
 }
 
@@ -523,12 +536,12 @@ function resize() {
   gridRows = Math.max(12, Math.floor(availableHeight / cell));
   const width = Math.floor(gridCols * cell);
   const height = Math.floor(gridRows * cell);
-  const pixelRatio = window.devicePixelRatio || 1;
+  const pixelRatio = Math.min(window.devicePixelRatio || 1, 2);
   canvas.value.style.width = `${width}px`;
   canvas.value.style.height = `${height}px`;
   canvas.value.width = Math.floor(width * pixelRatio);
   canvas.value.height = Math.floor(height * pixelRatio);
-  ctx = canvas.value.getContext("2d");
+  ctx = canvas.value.getContext("2d", { alpha: false });
   ctx.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);
   draw();
 }
@@ -537,6 +550,7 @@ function togglePause() {
   if (gameOver) return;
   paused.value = !paused.value;
   status.value = paused.value ? "已暂停" : "继续收集能量核心";
+  if (!paused.value) ensureLoop();
 }
 
 function onKey(event) {
@@ -561,7 +575,7 @@ function onKey(event) {
 const swipe = createSwipeHandlers(setDirection);
 
 onMounted(() => {
-  ctx = canvas.value.getContext("2d");
+  ctx = canvas.value.getContext("2d", { alpha: false });
   resize();
   restart();
   if (typeof ResizeObserver !== "undefined") {
@@ -575,7 +589,7 @@ onMounted(() => {
   document.addEventListener("webkitfullscreenchange", onFullscreenChange);
   document.addEventListener("mozfullscreenchange", onFullscreenChange);
   document.addEventListener("msfullscreenchange", onFullscreenChange);
-  loopId = requestAnimationFrame(loop);
+  ensureLoop();
 });
 
 onUnmounted(() => {
