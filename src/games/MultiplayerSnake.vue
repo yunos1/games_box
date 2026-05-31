@@ -40,11 +40,12 @@ const serverError = ref("");
 const isFullscreen = ref(false);
 
 const CELL_SIZE = 30;
+const MAX_PIXEL_RATIO = 2;
 const DEFAULT_GRID_WIDTH = 36;
 const DEFAULT_GRID_HEIGHT = 24;
 const DEFAULT_VIEWPORT_COLS = 36;
 const DEFAULT_VIEWPORT_ROWS = 24;
-const CAMERA_SMOOTHING = 1;
+const CAMERA_SMOOTHING = 0.36;
 const MINIMAP_WIDTH = 154;
 const MINIMAP_HEIGHT = 104;
 const MINIMAP_PADDING = 12;
@@ -52,6 +53,7 @@ const EDGE_HINT_PADDING = 34;
 const EDGE_HINT_DISTANCE = 34;
 const BOUNDARY_WARNING_CELLS = 7;
 const SPATIAL_BUCKET_SIZE = 12;
+const SNAKE_RENDER_PADDING = 4;
 const LONG_SNAKE_LENGTH = 720;
 const LONG_SNAKE_EXACT_SEGMENTS = 260;
 const LONG_SNAKE_TAIL_KEEP_SEGMENTS = 24;
@@ -66,6 +68,7 @@ const SERVER_TICK_MS = 115; // 对齐 worker 的 TICK_MS，作为 tickDuration �
 const TICK_DURATION_MIN = 80; // tickDuration 估算下界
 const TICK_DURATION_MAX = 260; // tickDuration 估算上界
 const TICK_DURATION_EMA = 0.2; // EMA 平滑系数（新样本权重），偏小更稳
+const RENDER_ALPHA_MAX = 1.14;
 const dirs = {
   up: { x: 0, y: -1 },
   down: { x: 0, y: 1 },
@@ -101,6 +104,7 @@ let renderAlpha = 1; // 当前帧插值系数 [0,1]，1=完全到达目标格（
 let animationFrameId = 0;
 let spatialCache = createSpatialCache();
 let canvasSize = { width: DEFAULT_VIEWPORT_COLS * CELL_SIZE, height: DEFAULT_VIEWPORT_ROWS * CELL_SIZE };
+let canvasPixelRatio = 1;
 
 const safeRoomCode = computed(() => props.roomCode.trim().toUpperCase());
 const players = computed(() => room.value?.players || []);
@@ -183,8 +187,8 @@ function connect() {
         const snapshot = new Map();
         const oldSnakes = room.value?.snakes || {};
         for (const id of Object.keys(oldSnakes)) {
-          const body = oldSnakes[id]?.body;
-          if (Array.isArray(body)) snapshot.set(id, body.map((p) => ({ x: p.x, y: p.y })));
+          const body = visibleBodySnapshot(id, oldSnakes[id]);
+          if (body.length) snapshot.set(id, body);
         }
         previousBodies = snapshot;
 
@@ -271,6 +275,58 @@ function normalizeDirection(dir) {
     x: x / length,
     y: y / length,
   };
+}
+
+function bodyIndex(part, fallbackIndex) {
+  return Number.isFinite(part?.index) ? part.index : fallbackIndex;
+}
+
+function snapshotBodyByIndex(body = []) {
+  const snapshot = [];
+  body.forEach((part, index) => {
+    const publicIndex = bodyIndex(part, index);
+    snapshot[publicIndex] = { ...part, index: publicIndex };
+  });
+  return snapshot;
+}
+
+function visibleBodySnapshot(playerId, snake) {
+  const body = snake?.body;
+  if (!Array.isArray(body)) return [];
+  if (renderAlpha <= 0 || !previousBodies.has(playerId)) {
+    return snapshotBodyByIndex(body);
+  }
+  const alpha = Math.min(renderAlpha, RENDER_ALPHA_MAX);
+  const snapshot = [];
+  body.forEach((part, index) => {
+    const publicIndex = bodyIndex(part, index);
+    const from = previousBodies.get(playerId)?.[publicIndex];
+    if (!from) {
+      snapshot[publicIndex] = { ...part, index: publicIndex };
+      return;
+    }
+    snapshot[publicIndex] = {
+      ...part,
+      index: publicIndex,
+      x: from.x + (part.x - from.x) * alpha,
+      y: from.y + (part.y - from.y) * alpha,
+    };
+  });
+  return snapshot;
+}
+
+function currentSnakeBodyPoint(snake, publicIndex) {
+  const body = snake?.body;
+  if (!Array.isArray(body)) return null;
+  const direct = body[publicIndex];
+  if (direct && bodyIndex(direct, publicIndex) === publicIndex) {
+    return {
+      ...direct,
+      index: publicIndex,
+    };
+  }
+  const indexed = body.find((part, index) => bodyIndex(part, index) === publicIndex);
+  return indexed ? { ...indexed, index: publicIndex } : null;
 }
 
 function directionChanged(next, threshold = 0.018) {
@@ -429,9 +485,21 @@ function boardSize() {
 
 function syncCanvasSize() {
   const size = boardSize();
-  if (canvas.value && (canvas.value.width !== size.width || canvas.value.height !== size.height)) {
-    canvas.value.width = size.width;
-    canvas.value.height = size.height;
+  if (canvas.value) {
+    const nextRatio = Math.min(window.devicePixelRatio || 1, MAX_PIXEL_RATIO);
+    const pixelWidth = Math.max(1, Math.floor(size.width * nextRatio));
+    const pixelHeight = Math.max(1, Math.floor(size.height * nextRatio));
+    if (canvas.value.width !== pixelWidth || canvas.value.height !== pixelHeight || canvasPixelRatio !== nextRatio) {
+      canvas.value.width = pixelWidth;
+      canvas.value.height = pixelHeight;
+      canvasPixelRatio = nextRatio;
+      ctx = canvas.value.getContext("2d", { alpha: false });
+      ctx.imageSmoothingEnabled = true;
+      ctx.imageSmoothingQuality = "high";
+      cameraReady = false;
+    }
+    ctx.setTransform(canvasPixelRatio, 0, 0, canvasPixelRatio, 0, 0);
+    ctx.imageSmoothingEnabled = true;
   }
   return size;
 }
@@ -443,14 +511,14 @@ function ownSnake() {
 // 自己蛇头插值后的世界格坐标，供相机平滑跟随；
 // 缺起点/已到位返回目标头，无蛇（观战/死亡）返回 null 让相机回退到世界居中。
 function ownHeadInterpolated() {
-  const head = ownSnake()?.body?.[0];
+  const head = currentSnakeBodyPoint(ownSnake(), 0);
   if (!head) return null;
-  if (renderAlpha >= 0.99) return head;
   const from = previousBodies.get(selfId.value)?.[0];
   if (!from) return head;
+  const alpha = Math.min(renderAlpha, RENDER_ALPHA_MAX);
   return {
-    x: from.x + (head.x - from.x) * renderAlpha,
-    y: from.y + (head.y - from.y) * renderAlpha,
+    x: from.x + (head.x - from.x) * alpha,
+    y: from.y + (head.y - from.y) * alpha,
   };
 }
 
@@ -926,13 +994,13 @@ function clipVisibleSnakeParts(parts, bodyLength) {
 // 数学同单机：移动后 body[i] === 旧 body[i-1]，故 previousBodies[id][i] → body[i] 即该段前滑一格。
 // 仅作用于最终绘制坐标：分桶/裁剪/缓存仍用目标整数格坐标，避免污染空间索引。
 function interpolateSnakePart(playerId, part) {
-  if (renderAlpha >= 0.99) return part;
   const from = previousBodies.get(playerId)?.[part.index];
+  const alpha = Math.min(renderAlpha, RENDER_ALPHA_MAX);
   if (!from) return part; // 缺起点（新蛇/吃食物新尾段/刚切阶段/刚重生）：停在当前格
   return {
     ...part,
-    x: from.x + (part.x - from.x) * renderAlpha,
-    y: from.y + (part.y - from.y) * renderAlpha,
+    x: from.x + (part.x - from.x) * alpha,
+    y: from.y + (part.y - from.y) * alpha,
   };
 }
 
@@ -942,11 +1010,13 @@ function drawSnake(snake, camera, boardWidth, boardHeight) {
   const cell = CELL_SIZE;
   const dir = normalizeDirection(snake.dir) || dirs.right;
   const buckets = cachedSnakeBuckets(snake);
-  const parts = queryBuckets(buckets, camera, boardWidth, boardHeight, cell)
-    .filter((part) => isPointVisible(part, camera, boardWidth, boardHeight, cell))
+  const parts = queryBuckets(buckets, camera, boardWidth, boardHeight, cell, SNAKE_RENDER_PADDING)
     .sort((a, b) => b.index - a.index)
     .map((part) => interpolateSnakePart(snake.playerId, part)); // 绘制前插值，平滑爬行
-  clipVisibleSnakeParts(parts, snakeBodyLength(snake)).forEach((part) => {
+  clipVisibleSnakeParts(
+    parts.filter((part) => isPointVisible(part, camera, boardWidth, boardHeight, cell, SNAKE_RENDER_PADDING)),
+    snakeBodyLength(snake),
+  ).forEach((part) => {
     drawSnakePart(part, part.index, cell, skin, dir, !player?.connected, part.tailSampled);
   });
 }
@@ -1017,7 +1087,7 @@ function draw() {
 function renderLoop() {
   // 仅 renderLoop 推进插值系数：距上次 tick 越久越接近目标格
   if (room.value?.phase === "playing" && lastTickAt) {
-    renderAlpha = clamp((performance.now() - lastTickAt) / tickDuration, 0, 1);
+    renderAlpha = clamp((performance.now() - lastTickAt) / tickDuration, 0, RENDER_ALPHA_MAX);
   } else {
     renderAlpha = 1; // 非对局或尚无计时基线：不插值
   }

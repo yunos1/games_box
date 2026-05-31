@@ -21,6 +21,7 @@ const VIEWPORT_GRID = 24;
 const WORLD_SCALE = 10;
 const grid = VIEWPORT_GRID * WORLD_SCALE;
 const CELL_SIZE = 30;
+const MAX_PIXEL_RATIO = 2;
 const CAMERA_SMOOTHING = 0.26;
 const FOOD_TARGET = 72;
 const LOCAL_FOOD_RATIO = 0.62;
@@ -28,6 +29,7 @@ const CONTESTED_FOOD_RATIO = 0.18;
 const FOOD_SPAWN_RADIUS = 22;
 const EXPLORE_FOOD_RADIUS = 72;
 const SPATIAL_BUCKET_SIZE = 12;
+const SNAKE_RENDER_PADDING = 4;
 const MINIMAP_SIZE = 132;
 const MINIMAP_PADDING = 12;
 const MINIMAP_DENSITY_CELL = 4;
@@ -85,6 +87,7 @@ let stateTick = 0;
 let spatialCache = createSpatialCache();
 let resizeObserver;
 let canvasSize = { width: size, height: size };
+let canvasPixelRatio = 1;
 const foodImages = new Map();
 let foodBag = [];
 let lastFoodId = "";
@@ -585,17 +588,41 @@ function boardSize() {
 }
 
 function syncCanvasSize() {
-  if (canvas.value && (canvas.value.width !== canvasSize.width || canvas.value.height !== canvasSize.height)) {
-    canvas.value.width = canvasSize.width;
-    canvas.value.height = canvasSize.height;
-    cameraReady = false;
+  if (canvas.value) {
+    const nextRatio = Math.min(window.devicePixelRatio || 1, MAX_PIXEL_RATIO);
+    const pixelWidth = Math.max(1, Math.floor(canvasSize.width * nextRatio));
+    const pixelHeight = Math.max(1, Math.floor(canvasSize.height * nextRatio));
+    if (canvas.value.width !== pixelWidth || canvas.value.height !== pixelHeight || canvasPixelRatio !== nextRatio) {
+      canvas.value.width = pixelWidth;
+      canvas.value.height = pixelHeight;
+      canvasPixelRatio = nextRatio;
+      ctx = canvas.value.getContext("2d", { alpha: false });
+      ctx.imageSmoothingEnabled = true;
+      ctx.imageSmoothingQuality = "high";
+      bodySpriteCache.clear();
+      cameraReady = false;
+    }
+    ctx.setTransform(canvasPixelRatio, 0, 0, canvasPixelRatio, 0, 0);
+    ctx.imageSmoothingEnabled = true;
   }
   return canvasSize;
 }
 
+function interpolatedSnakePoint(snake, index = 0) {
+  const target = snake?.body?.[index];
+  if (!target) return null;
+  if (renderAlpha >= 0.99) return target;
+  const from = snake.previousBody?.[index];
+  if (!from) return target;
+  return {
+    x: from.x + (target.x - from.x) * renderAlpha,
+    y: from.y + (target.y - from.y) * renderAlpha,
+  };
+}
+
 function targetCameraOffset(boardWidth, boardHeight) {
   const world = worldSize();
-  const head = player?.body?.[0] || lastPlayerHead;
+  const head = interpolatedSnakePoint(player, 0) || lastPlayerHead;
   const target = head
     ? {
         x: head.x * CELL_SIZE + CELL_SIZE / 2 - boardWidth / 2,
@@ -1227,10 +1254,10 @@ function drawSnake(snake, isPlayer = false, cameraView = camera, boardWidth = si
   const dir = isPlayer ? direction : dirs[snake.dir];
   const buckets = cachedSnakeBuckets(snake, isPlayer);
   const bodyLength = snake.body?.length || 0;
-  const parts = queryBuckets(buckets, cameraView, boardWidth, boardHeight)
-    .filter((part) => isPointVisible(part, cameraView, boardWidth, boardHeight))
+  const parts = queryBuckets(buckets, cameraView, boardWidth, boardHeight, SNAKE_RENDER_PADDING)
     .sort((a, b) => b.index - a.index)
-    .map((part) => interpolatedPart(snake, part));
+    .map((part) => interpolatedPart(snake, part))
+    .filter((part) => isPointVisible(part, cameraView, boardWidth, boardHeight, SNAKE_RENDER_PADDING));
   clipVisibleSnakeParts(parts, bodyLength).forEach((part) => {
     drawSnakePart(part, part.index, CELL_SIZE, skin, dir, shouldSimplifySnakePart(part.index, bodyLength));
   });
@@ -1241,6 +1268,7 @@ function draw() {
   const { width: boardWidth, height: boardHeight } = syncCanvasSize();
   const camera = cameraOffset(boardWidth, boardHeight);
   const world = worldSize();
+  ctx.setTransform(canvasPixelRatio, 0, 0, canvasPixelRatio, 0, 0);
   ctx.clearRect(0, 0, boardWidth, boardHeight);
   ctx.fillStyle = "#020611";
   ctx.fillRect(0, 0, boardWidth, boardHeight);
@@ -1338,8 +1366,7 @@ function onKey(event) {
 
 onMounted(() => {
   ctx = canvas.value.getContext("2d", { alpha: false });
-  canvas.value.width = size;
-  canvas.value.height = size;
+  ctx.imageSmoothingEnabled = true;
   restart();
   resize();
   resizeObserver = new ResizeObserver(resize);
