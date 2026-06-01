@@ -2,7 +2,6 @@
 import { computed, onMounted, onUnmounted, ref } from "vue";
 import { ChevronDown, Settings, Maximize, Minimize } from "lucide-vue-next";
 import GameLayout from "../components/GameLayout.vue";
-import { createSwipeHandlers } from "../utils/touch";
 import { SNAKE_FOODS } from "../data/snakeFoods";
 import { SNAKE_SKINS, getSnakeSkinById } from "../data/snakeSkins";
 import { getBestScore, getSavedValue, setBestScore, setSavedValue } from "../utils/storage";
@@ -23,22 +22,54 @@ const variantEffect = dailyVariant?.effect || "";
 const isFullscreen = ref(false);
 
 const gridCols = 22;
+const MAX_PIXEL_RATIO = 2;
+const TOUCH_DIRECTION_DEADZONE = 8;
+const TOUCH_DIRECTION_SMOOTHING = 0.42;
+const LONG_SNAKE_LENGTH = 520;
+const LONG_SNAKE_EXACT_SEGMENTS = 220;
+const LONG_SNAKE_TAIL_KEEP_SEGMENTS = 24;
+const dirs = {
+  up: { x: 0, y: -1 },
+  down: { x: 0, y: 1 },
+  left: { x: -1, y: 0 },
+  right: { x: 1, y: 0 },
+};
+const KEY_ACTIONS = {
+  ArrowUp: "up",
+  ArrowDown: "down",
+  ArrowLeft: "left",
+  ArrowRight: "right",
+  w: "up",
+  s: "down",
+  a: "left",
+  d: "right",
+  " ": "pause",
+};
 let gridRows = 22;
 let ctx;
 let snake;
+let previousSnake = [];
+let snakeCells = new Set();
 let food;
 let direction;
 let nextDirection;
 let loopId = 0;
 let lastTick = 0;
+let renderAlpha = 1;
 let gameOver = false;
 let foodsEaten = 0;
 let maxLength = 3;
 let runNewGoalIds = new Set();
 let resizeObserver;
+let canvasSize = { width: 660, height: 660 };
+let canvasPixelRatio = 1;
 const foodImages = new Map();
+const bodySpriteCache = new Map();
 let foodBag = [];
 let lastFoodId = "";
+let activePointerId = null;
+let touchAnchor = null;
+let smoothedTouchDirection = null;
 
 function selectSkin(id) {
   selectedSkinId.value = id;
@@ -65,13 +96,44 @@ function nextFoodAsset() {
   return nextFood;
 }
 
+function clamp(value, min, max) {
+  return Math.max(min, Math.min(max, value));
+}
+
+function cellKey(point) {
+  return `${point.x}:${point.y}`;
+}
+
+function cloneSnakeBody(body = snake) {
+  return body.map((part) => ({ x: part.x, y: part.y }));
+}
+
+function rebuildSnakeCells() {
+  snakeCells = new Set((snake || []).map(cellKey));
+}
+
+function normalizeDirection(dir) {
+  const length = Math.hypot(dir.x, dir.y);
+  if (!length) return dirs.right;
+  return {
+    x: dir.x / length,
+    y: dir.y / length,
+  };
+}
+
+function directionNameFromVector(dir) {
+  if (Math.abs(dir.x) > Math.abs(dir.y)) return dir.x > 0 ? "right" : "left";
+  if (Math.abs(dir.y) > 0) return dir.y > 0 ? "down" : "up";
+  return null;
+}
+
 function placeFood() {
   let x;
   let y;
   do {
     x = Math.floor(Math.random() * gridCols);
     y = Math.floor(Math.random() * gridRows);
-  } while (snake.some((part) => part.x === x && part.y === y));
+  } while (snakeCells.has(`${x}:${y}`));
 
   food = {
     x,
@@ -163,8 +225,14 @@ function restart() {
     { x: startX - 1, y: startY },
     { x: startX - 2, y: startY },
   ];
-  direction = { x: 1, y: 0 };
-  nextDirection = { x: 1, y: 0 };
+  previousSnake = cloneSnakeBody(snake);
+  rebuildSnakeCells();
+  direction = dirs.right;
+  nextDirection = dirs.right;
+  activePointerId = null;
+  touchAnchor = null;
+  smoothedTouchDirection = null;
+  renderAlpha = 1;
   score.value = 0;
   runResult.value = null;
   runNewGoalIds = new Set();
@@ -191,20 +259,59 @@ function restart() {
 }
 
 function setDirection(name) {
-  const dirs = {
-    up: { x: 0, y: -1 },
-    down: { x: 0, y: 1 },
-    left: { x: -1, y: 0 },
-    right: { x: 1, y: 0 },
-  };
   const dir = dirs[name];
   if (!dir) return;
   if (dir.x + direction.x === 0 && dir.y + direction.y === 0) return;
   nextDirection = dir;
 }
 
+function setDirectionFromSwipe(clientX, clientY) {
+  if (!canvas.value || gameOver || !touchAnchor) return;
+  const rect = canvas.value.getBoundingClientRect();
+  const dx = clientX - rect.left - touchAnchor.x;
+  const dy = clientY - rect.top - touchAnchor.y;
+  if (Math.hypot(dx, dy) < TOUCH_DIRECTION_DEADZONE) return;
+  const targetDirection = normalizeDirection({ x: dx, y: dy });
+  smoothedTouchDirection = smoothedTouchDirection
+    ? normalizeDirection({
+        x: smoothedTouchDirection.x + (targetDirection.x - smoothedTouchDirection.x) * TOUCH_DIRECTION_SMOOTHING,
+        y: smoothedTouchDirection.y + (targetDirection.y - smoothedTouchDirection.y) * TOUCH_DIRECTION_SMOOTHING,
+      })
+    : targetDirection;
+  const name = directionNameFromVector(smoothedTouchDirection);
+  if (name) setDirection(name);
+}
+
+function onPointerDown(event) {
+  if (gameOver) return;
+  event.preventDefault();
+  activePointerId = event.pointerId;
+  const rect = canvas.value.getBoundingClientRect();
+  touchAnchor = { x: event.clientX - rect.left, y: event.clientY - rect.top };
+  smoothedTouchDirection = { ...direction };
+  event.currentTarget.setPointerCapture?.(event.pointerId);
+}
+
+function onPointerMove(event) {
+  if (activePointerId !== event.pointerId || gameOver) return;
+  event.preventDefault();
+  setDirectionFromSwipe(event.clientX, event.clientY);
+}
+
+function onPointerEnd(event) {
+  if (activePointerId === event.pointerId) activePointerId = null;
+  touchAnchor = null;
+  smoothedTouchDirection = null;
+  try {
+    event.currentTarget.releasePointerCapture?.(event.pointerId);
+  } catch {
+    // Pointer capture may already have been released by the browser.
+  }
+}
+
 function step() {
   if (paused.value || gameOver) return;
+  previousSnake = cloneSnakeBody();
   direction = nextDirection;
   let head = {
     x: snake[0].x + direction.x,
@@ -219,7 +326,7 @@ function step() {
 
   if (
     (variantEffect !== "wrap-walls" && (head.x < 0 || head.y < 0 || head.x >= gridCols || head.y >= gridRows)) ||
-    snake.some((part) => part.x === head.x && part.y === head.y)
+    snakeCells.has(cellKey(head))
   ) {
     gameOver = true;
     status.value = "撞毁，点击重开";
@@ -235,9 +342,11 @@ function step() {
     maxLength = Math.max(maxLength, snake.length);
     best.value = setBestScore("snake", score.value);
     syncProgress();
+    rebuildSnakeCells();
     placeFood();
   } else {
     snake.pop();
+    rebuildSnakeCells();
   }
 }
 
@@ -260,180 +369,221 @@ function drawGrid(width, height, cell) {
   }
 }
 
-function roundedRect(x, y, width, height, radius) {
-  ctx.beginPath();
-  ctx.moveTo(x + radius, y);
-  ctx.arcTo(x + width, y, x + width, y + height, radius);
-  ctx.arcTo(x + width, y + height, x, y + height, radius);
-  ctx.arcTo(x, y + height, x, y, radius);
-  ctx.arcTo(x, y, x + width, y, radius);
-  ctx.closePath();
+function roundedRect(x, y, width, height, radius, c = ctx) {
+  c.beginPath();
+  c.moveTo(x + radius, y);
+  c.arcTo(x + width, y, x + width, y + height, radius);
+  c.arcTo(x + width, y + height, x, y + height, radius);
+  c.arcTo(x, y + height, x, y, radius);
+  c.arcTo(x, y, x + width, y, radius);
+  c.closePath();
 }
 
-function drawSkinPattern(skin, x, y, size, index) {
+function drawSkinPattern(skin, x, y, size, index, c = ctx) {
   const cx = x + size / 2;
   const cy = y + size / 2;
-  ctx.save();
-  ctx.globalAlpha = 0.9;
-  ctx.strokeStyle = skin.bodyAlt;
-  ctx.fillStyle = skin.bodyAlt;
-  ctx.lineWidth = Math.max(1.2, size * 0.08);
+  c.save();
+  c.globalAlpha = 0.9;
+  c.strokeStyle = skin.bodyAlt;
+  c.fillStyle = skin.bodyAlt;
+  c.lineWidth = Math.max(1.2, size * 0.08);
 
   if (skin.pattern === "circuits") {
-    ctx.beginPath();
-    ctx.moveTo(x + size * 0.22, cy);
-    ctx.lineTo(x + size * 0.78, cy);
-    ctx.moveTo(cx, y + size * 0.26);
-    ctx.lineTo(cx, y + size * 0.46);
-    ctx.stroke();
-    ctx.beginPath();
-    ctx.arc(x + size * 0.78, cy, size * 0.08, 0, Math.PI * 2);
-    ctx.fill();
+    c.beginPath();
+    c.moveTo(x + size * 0.22, cy);
+    c.lineTo(x + size * 0.78, cy);
+    c.moveTo(cx, y + size * 0.26);
+    c.lineTo(cx, y + size * 0.46);
+    c.stroke();
+    c.beginPath();
+    c.arc(x + size * 0.78, cy, size * 0.08, 0, Math.PI * 2);
+    c.fill();
   }
 
   if (skin.pattern === "cracks") {
-    ctx.beginPath();
-    ctx.moveTo(x + size * 0.24, y + size * 0.24);
-    ctx.lineTo(cx, cy);
-    ctx.lineTo(x + size * 0.7, y + size * 0.76);
-    ctx.stroke();
+    c.beginPath();
+    c.moveTo(x + size * 0.24, y + size * 0.24);
+    c.lineTo(cx, cy);
+    c.lineTo(x + size * 0.7, y + size * 0.76);
+    c.stroke();
   }
 
   if (skin.pattern === "snow") {
-    ctx.lineWidth = Math.max(1, size * 0.06);
-    ctx.beginPath();
-    ctx.moveTo(cx - size * 0.18, cy);
-    ctx.lineTo(cx + size * 0.18, cy);
-    ctx.moveTo(cx, cy - size * 0.18);
-    ctx.lineTo(cx, cy + size * 0.18);
-    ctx.stroke();
+    c.lineWidth = Math.max(1, size * 0.06);
+    c.beginPath();
+    c.moveTo(cx - size * 0.18, cy);
+    c.lineTo(cx + size * 0.18, cy);
+    c.moveTo(cx, cy - size * 0.18);
+    c.lineTo(cx, cy + size * 0.18);
+    c.stroke();
   }
 
   if (skin.pattern === "leaves") {
-    ctx.save();
-    ctx.translate(cx, cy);
-    ctx.rotate(index % 2 ? -0.65 : 0.65);
-    ctx.beginPath();
-    ctx.ellipse(0, 0, size * 0.2, size * 0.09, 0, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.restore();
+    c.save();
+    c.translate(cx, cy);
+    c.rotate(index % 2 ? -0.65 : 0.65);
+    c.beginPath();
+    c.ellipse(0, 0, size * 0.2, size * 0.09, 0, 0, Math.PI * 2);
+    c.fill();
+    c.restore();
   }
 
   if (skin.pattern === "gems") {
-    ctx.beginPath();
-    ctx.moveTo(cx, y + size * 0.18);
-    ctx.lineTo(x + size * 0.72, cy);
-    ctx.lineTo(cx, y + size * 0.82);
-    ctx.lineTo(x + size * 0.28, cy);
-    ctx.closePath();
-    ctx.fill();
+    c.beginPath();
+    c.moveTo(cx, y + size * 0.18);
+    c.lineTo(x + size * 0.72, cy);
+    c.lineTo(cx, y + size * 0.82);
+    c.lineTo(x + size * 0.28, cy);
+    c.closePath();
+    c.fill();
   }
 
   if (skin.pattern === "stripes") {
-    ctx.beginPath();
-    ctx.moveTo(x + size * 0.24, y + size * 0.82);
-    ctx.lineTo(x + size * 0.82, y + size * 0.24);
-    ctx.stroke();
+    c.beginPath();
+    c.moveTo(x + size * 0.24, y + size * 0.82);
+    c.lineTo(x + size * 0.82, y + size * 0.24);
+    c.stroke();
   }
 
   if (skin.pattern === "stars") {
-    ctx.lineWidth = Math.max(1, size * 0.05);
-    ctx.beginPath();
-    ctx.moveTo(cx - size * 0.2, cy);
-    ctx.lineTo(cx + size * 0.2, cy);
-    ctx.moveTo(cx, cy - size * 0.2);
-    ctx.lineTo(cx, cy + size * 0.2);
-    ctx.stroke();
-    ctx.beginPath();
-    ctx.arc(cx, cy, size * 0.05, 0, Math.PI * 2);
-    ctx.fill();
+    c.lineWidth = Math.max(1, size * 0.05);
+    c.beginPath();
+    c.moveTo(cx - size * 0.2, cy);
+    c.lineTo(cx + size * 0.2, cy);
+    c.moveTo(cx, cy - size * 0.2);
+    c.lineTo(cx, cy + size * 0.2);
+    c.stroke();
+    c.beginPath();
+    c.arc(cx, cy, size * 0.05, 0, Math.PI * 2);
+    c.fill();
   }
 
   if (skin.pattern === "scales") {
-    ctx.globalAlpha = 0.55;
+    c.globalAlpha = 0.55;
     for (let i = 0; i < 3; i += 1) {
-      ctx.beginPath();
-      ctx.arc(x + size * (0.28 + i * 0.22), cy, size * 0.12, Math.PI, Math.PI * 2);
-      ctx.stroke();
+      c.beginPath();
+      c.arc(x + size * (0.28 + i * 0.22), cy, size * 0.12, Math.PI, Math.PI * 2);
+      c.stroke();
     }
   }
 
   if (skin.pattern === "tiger") {
-    ctx.lineWidth = Math.max(1.4, size * 0.12);
-    ctx.beginPath();
-    ctx.moveTo(x + size * 0.2, y + size * 0.22);
-    ctx.lineTo(x + size * 0.72, y + size * 0.76);
-    ctx.stroke();
+    c.lineWidth = Math.max(1.4, size * 0.12);
+    c.beginPath();
+    c.moveTo(x + size * 0.2, y + size * 0.22);
+    c.lineTo(x + size * 0.72, y + size * 0.76);
+    c.stroke();
   }
 
   if (skin.pattern === "mist") {
-    ctx.globalAlpha = 0.26;
-    ctx.beginPath();
-    ctx.arc(x + size * 0.36, y + size * 0.36, size * 0.2, 0, Math.PI * 2);
-    ctx.arc(x + size * 0.68, y + size * 0.66, size * 0.16, 0, Math.PI * 2);
-    ctx.fill();
+    c.globalAlpha = 0.26;
+    c.beginPath();
+    c.arc(x + size * 0.36, y + size * 0.36, size * 0.2, 0, Math.PI * 2);
+    c.arc(x + size * 0.68, y + size * 0.66, size * 0.16, 0, Math.PI * 2);
+    c.fill();
   }
 
-  ctx.restore();
+  c.restore();
+}
+
+function getBodySprite(skin, cell) {
+  const key = `${Math.round(cell * 100)}|${skin.body}|${skin.bodyAlt}|${skin.glow}|${skin.pattern}`;
+  const cached = bodySpriteCache.get(key);
+  if (cached) return cached;
+
+  const gap = Math.max(0.5, cell * 0.025);
+  const size = cell - gap * 2;
+  const blur = Math.max(6, cell * 0.32);
+  const pad = Math.ceil(blur + 2);
+  const spriteSize = Math.ceil(size + pad * 2);
+  const sprite = document.createElement("canvas");
+  sprite.width = spriteSize;
+  sprite.height = spriteSize;
+  const c = sprite.getContext("2d");
+
+  c.shadowBlur = blur;
+  c.shadowColor = skin.glow;
+  const fill = c.createLinearGradient(pad, pad, pad + size, pad + size);
+  fill.addColorStop(0, skin.body);
+  fill.addColorStop(1, skin.bodyAlt);
+  c.fillStyle = fill;
+  roundedRect(pad, pad, size, size, size * 0.34, c);
+  c.fill();
+
+  c.shadowBlur = 0;
+  c.fillStyle = "rgba(255,255,255,0.24)";
+  roundedRect(pad + size * 0.18, pad + size * 0.14, size * 0.32, size * 0.14, size * 0.07, c);
+  c.fill();
+  drawSkinPattern(skin, pad, pad, size, 0, c);
+
+  const entry = { canvas: sprite, half: spriteSize / 2 };
+  bodySpriteCache.set(key, entry);
+  return entry;
 }
 
 function drawSnakePart(part, index, cell, skin) {
-  const gap = Math.max(1.2, cell * 0.035);
+  const isHead = index === 0;
+  const centerX = part.x * cell + cell / 2;
+  const centerY = part.y * cell + cell / 2;
+
+  if (!isHead) {
+    const sprite = getBodySprite(skin, cell);
+    ctx.drawImage(sprite.canvas, centerX - sprite.half, centerY - sprite.half);
+    return;
+  }
+
+  const gap = Math.max(0.5, cell * 0.025);
   const x = part.x * cell + gap;
   const y = part.y * cell + gap;
   const size = cell - gap * 2;
   const center = { x: x + size / 2, y: y + size / 2 };
-  const isHead = index === 0;
 
   ctx.save();
-  ctx.shadowBlur = isHead ? 22 : 15;
-  ctx.shadowColor = isHead ? skin.head : skin.glow;
+  ctx.shadowBlur = Math.max(12, cell * 0.5);
+  ctx.shadowColor = skin.head;
   const fill = ctx.createLinearGradient(x, y, x + size, y + size);
-  fill.addColorStop(0, isHead ? skin.head : skin.body);
+  fill.addColorStop(0, skin.head);
   fill.addColorStop(1, skin.bodyAlt);
   ctx.fillStyle = fill;
-  roundedRect(x, y, size, size, isHead ? size * 0.42 : size * 0.34);
+  roundedRect(x, y, size, size, size * 0.42);
   ctx.fill();
 
   ctx.shadowBlur = 0;
   ctx.fillStyle = "rgba(255,255,255,0.24)";
   roundedRect(x + size * 0.18, y + size * 0.14, size * 0.32, size * 0.14, size * 0.07);
   ctx.fill();
-  if (!isHead) drawSkinPattern(skin, x, y, size, index);
 
-  if (isHead) {
-    const dir = direction || { x: 1, y: 0 };
-    const side = { x: -dir.y, y: dir.x };
-    const forward = { x: dir.x, y: dir.y };
-    const eyeForward = size * 0.2;
-    const eyeSide = size * 0.18;
-    const eyeRadius = Math.max(2.2, size * 0.09);
-    const eyes = [-1, 1].map((sign) => ({
-      x: center.x + forward.x * eyeForward + side.x * eyeSide * sign,
-      y: center.y + forward.y * eyeForward + side.y * eyeSide * sign,
-    }));
-    ctx.fillStyle = skin.eye;
-    eyes.forEach((eye) => {
-      ctx.beginPath();
-      ctx.arc(eye.x, eye.y, eyeRadius, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.fillStyle = "rgba(255,255,255,0.78)";
-      ctx.beginPath();
-      ctx.arc(eye.x + eyeRadius * 0.25, eye.y - eyeRadius * 0.25, eyeRadius * 0.32, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.fillStyle = skin.eye;
-    });
-
-    ctx.strokeStyle = skin.bodyAlt;
-    ctx.lineWidth = Math.max(1.2, size * 0.08);
-    ctx.lineCap = "round";
+  const dir = direction || dirs.right;
+  const side = { x: -dir.y, y: dir.x };
+  const forward = { x: dir.x, y: dir.y };
+  const eyeForward = size * 0.2;
+  const eyeSide = size * 0.18;
+  const eyeRadius = Math.max(2.2, size * 0.09);
+  const eyes = [-1, 1].map((sign) => ({
+    x: center.x + forward.x * eyeForward + side.x * eyeSide * sign,
+    y: center.y + forward.y * eyeForward + side.y * eyeSide * sign,
+  }));
+  ctx.fillStyle = skin.eye;
+  eyes.forEach((eye) => {
     ctx.beginPath();
-    ctx.moveTo(center.x + forward.x * size * 0.42, center.y + forward.y * size * 0.42);
-    ctx.lineTo(center.x + forward.x * size * 0.62 + side.x * size * 0.15, center.y + forward.y * size * 0.62 + side.y * size * 0.15);
-    ctx.moveTo(center.x + forward.x * size * 0.42, center.y + forward.y * size * 0.42);
-    ctx.lineTo(center.x + forward.x * size * 0.62 - side.x * size * 0.15, center.y + forward.y * size * 0.62 - side.y * size * 0.15);
-    ctx.stroke();
-  }
+    ctx.arc(eye.x, eye.y, eyeRadius, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = "rgba(255,255,255,0.78)";
+    ctx.beginPath();
+    ctx.arc(eye.x + eyeRadius * 0.25, eye.y - eyeRadius * 0.25, eyeRadius * 0.32, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = skin.eye;
+  });
+
+  ctx.strokeStyle = skin.bodyAlt;
+  ctx.lineWidth = Math.max(1.2, size * 0.08);
+  ctx.lineCap = "round";
+  ctx.beginPath();
+  ctx.moveTo(center.x + forward.x * size * 0.42, center.y + forward.y * size * 0.42);
+  ctx.lineTo(center.x + forward.x * size * 0.62 + side.x * size * 0.15, center.y + forward.y * size * 0.62 + side.y * size * 0.15);
+  ctx.moveTo(center.x + forward.x * size * 0.42, center.y + forward.y * size * 0.42);
+  ctx.lineTo(center.x + forward.x * size * 0.62 - side.x * size * 0.15, center.y + forward.y * size * 0.62 - side.y * size * 0.15);
+  ctx.stroke();
 
   ctx.restore();
 }
@@ -481,10 +631,49 @@ function drawFood(cell) {
   ctx.restore();
 }
 
+function boardSize() {
+  return canvasSize;
+}
+
+function syncCanvasSize() {
+  if (!canvas.value) return canvasSize;
+  const nextRatio = Math.min(window.devicePixelRatio || 1, MAX_PIXEL_RATIO);
+  const pixelWidth = Math.max(1, Math.floor(canvasSize.width * nextRatio));
+  const pixelHeight = Math.max(1, Math.floor(canvasSize.height * nextRatio));
+  if (canvas.value.width !== pixelWidth || canvas.value.height !== pixelHeight || canvasPixelRatio !== nextRatio) {
+    canvas.value.width = pixelWidth;
+    canvas.value.height = pixelHeight;
+    canvasPixelRatio = nextRatio;
+    ctx = canvas.value.getContext("2d", { alpha: false });
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = "high";
+    bodySpriteCache.clear();
+  }
+  ctx.setTransform(canvasPixelRatio, 0, 0, canvasPixelRatio, 0, 0);
+  ctx.imageSmoothingEnabled = true;
+  return boardSize();
+}
+
+function interpolatedPart(part, index) {
+  if (renderAlpha >= 0.99) return part;
+  const from = previousSnake[index];
+  if (!from) return part;
+  return {
+    x: from.x + (part.x - from.x) * renderAlpha,
+    y: from.y + (part.y - from.y) * renderAlpha,
+  };
+}
+
+function drawableSnakeParts() {
+  const parts = snake.map((part, index) => ({ ...interpolatedPart(part, index), index }));
+  if (parts.length <= LONG_SNAKE_LENGTH) return parts;
+  const tailKeepStart = Math.max(LONG_SNAKE_EXACT_SEGMENTS, parts.length - LONG_SNAKE_TAIL_KEEP_SEGMENTS);
+  return parts.filter((part) => part.index < LONG_SNAKE_EXACT_SEGMENTS || part.index >= tailKeepStart);
+}
+
 function draw() {
   if (!canvas.value || !snake || !food) return;
-  const width = canvas.value.clientWidth || canvas.value.width;
-  const height = canvas.value.clientHeight || canvas.value.height;
+  const { width, height } = syncCanvasSize();
   const cell = width / gridCols;
   const skin = selectedSkin.value;
   ctx.clearRect(0, 0, width, height);
@@ -494,8 +683,8 @@ function draw() {
 
   drawFood(cell);
 
-  [...snake].reverse().forEach((part, reversedIndex) => {
-    drawSnakePart(part, snake.length - 1 - reversedIndex, cell, skin);
+  drawableSnakeParts().reverse().forEach((part) => {
+    drawSnakePart(part, part.index, cell, skin);
   });
   ctx.shadowBlur = 0;
 }
@@ -507,11 +696,13 @@ function loop(time) {
   }
   const tickSpeed = variantEffect === "turbo" ? 108 : 150;
   if (!lastTick) lastTick = time;
-  if (time - lastTick > tickSpeed) {
+  if (time - lastTick > Math.max(tickSpeed, 240)) lastTick = time - tickSpeed;
+  if (time - lastTick >= tickSpeed) {
     step();
-    draw();
     lastTick = time;
   }
+  renderAlpha = clamp((time - lastTick) / tickSpeed, 0, 1);
+  draw();
   loopId = requestAnimationFrame(loop);
 }
 
@@ -536,13 +727,10 @@ function resize() {
   gridRows = Math.max(12, Math.floor(availableHeight / cell));
   const width = Math.floor(gridCols * cell);
   const height = Math.floor(gridRows * cell);
-  const pixelRatio = Math.min(window.devicePixelRatio || 1, 2);
   canvas.value.style.width = `${width}px`;
   canvas.value.style.height = `${height}px`;
-  canvas.value.width = Math.floor(width * pixelRatio);
-  canvas.value.height = Math.floor(height * pixelRatio);
-  ctx = canvas.value.getContext("2d", { alpha: false });
-  ctx.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);
+  canvasSize = { width, height };
+  syncCanvasSize();
   draw();
 }
 
@@ -554,28 +742,16 @@ function togglePause() {
 }
 
 function onKey(event) {
-  const map = {
-    ArrowUp: "up",
-    ArrowDown: "down",
-    ArrowLeft: "left",
-    ArrowRight: "right",
-    w: "up",
-    s: "down",
-    a: "left",
-    d: "right",
-    " ": "pause",
-  };
-  const action = map[event.key];
+  const action = KEY_ACTIONS[event.key];
   if (!action) return;
   event.preventDefault();
   if (action === "pause") togglePause();
   else setDirection(action);
 }
 
-const swipe = createSwipeHandlers(setDirection);
-
 onMounted(() => {
   ctx = canvas.value.getContext("2d", { alpha: false });
+  ctx.imageSmoothingEnabled = true;
   resize();
   restart();
   if (typeof ResizeObserver !== "undefined") {
@@ -631,11 +807,16 @@ onUnmounted(() => {
       </button>
       <div
         class="board-shell snake-board-shell"
-        @touchstart.passive="swipe.onTouchStart"
-        @touchend.passive="swipe.onTouchEnd"
-        @touchmove.prevent
       >
-        <canvas ref="canvas" class="canvas-board" aria-label="贪吃蛇游戏画布"></canvas>
+        <canvas
+          ref="canvas"
+          class="canvas-board snake-canvas"
+          aria-label="贪吃蛇游戏画布"
+          @pointerdown="onPointerDown"
+          @pointermove="onPointerMove"
+          @pointerup="onPointerEnd"
+          @pointercancel="onPointerEnd"
+        ></canvas>
       </div>
       <aside class="control-panel snake-side-panel">
         <details class="snake-drawer" open>
@@ -739,6 +920,10 @@ onUnmounted(() => {
 
 .snake-board-shell .canvas-board {
   max-height: 100%;
+}
+
+.snake-canvas {
+  touch-action: none;
 }
 
 .is-fullscreen .snake-board-shell {
