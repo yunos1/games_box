@@ -240,6 +240,7 @@ function update() {
 
 onMounted(() => {
   resetLevel(false);
+  if (timer) window.clearInterval(timer);
   timer = window.setInterval(update, 520);
 });
 onUnmounted(() => window.clearInterval(timer));
